@@ -1,8 +1,9 @@
 package metodosdirectos;
 import funcionmatematica.Funcion;
+import org.mariuszgromada.math.mxparser.Expression;
 
 public class RegulaFalsiModificada extends CondicionMetodoDirectos{
-    public RegulaFalsiModificada(double a, double b, double epsilon, Funcion f) {
+    public RegulaFalsiModificada(double a, double b, double epsilon, String f) {
         super(a, b, epsilon, f);
     }
 
@@ -13,28 +14,43 @@ public class RegulaFalsiModificada extends CondicionMetodoDirectos{
         double aActual = this.a;
         double bActual = this.b;
 
-        double fValue = f.evaluar(aActual);
-        double gValue = f.evaluar(bActual);
-        double w = f.evaluar(aActual);
+        Expression fa = new Expression(f + " | x = " + aActual);
+        Expression fb = new Expression(f + " | x = " + bActual);
+        double FA = fa.calculate();
+        double FB = fb.calculate();
+        double W = fa.calculate();
 
-        double c = (aActual * f.evaluar(bActual) - bActual * f.evaluar(aActual)) / (f.evaluar(bActual) - f.evaluar(aActual));
+        double fValue = FA;
+        double gValue = FB;
+        //double w = f.evaluar(aActual);
 
-        while (Math.abs(f.evaluar(c)) > epsilon) {
-            if (f.evaluar(aActual) * f.evaluar(c) < 0) {
+        double c = (aActual * FB - bActual * FA) / (FB - FA);
+
+        Expression fc = new Expression(f + " | x = " + c);
+        double FC = fc.calculate();
+
+        while (Math.abs(FC) > epsilon) {
+            if (FA * FC < 0) {
                 bActual = c;
-                gValue = f.evaluar(c);
-                if (w * gValue > 0) {
+                gValue = FC;
+                if (W * gValue > 0) {
                     fValue = fValue / 2.0;
                 }
             } else {
                 aActual = c;
-                fValue = f.evaluar(c);
-                if (w * fValue > 0) {
+                fValue = FC;
+                if (W * fValue > 0) {
                     gValue = gValue / 2.0;
                 }
             }
 
-            w = f.evaluar(c);
+            W = FC;
+
+            fa = new Expression(f + " | x = " + aActual);
+            fb = new Expression(f + " | x = " + bActual);
+            FA = fa.calculate();
+            FB = fb.calculate();
+
             c = (aActual * gValue - bActual * fValue) / (gValue - fValue);
         }
 

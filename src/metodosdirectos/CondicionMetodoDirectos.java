@@ -14,10 +14,18 @@ public abstract class CondicionMetodoDirectos {
         this.f=f;
     }
     public boolean evaluarCondicion() {
-        Expression fa = new Expression(f + " | x = " + a);
-        Expression fb = new Expression(f + " | x = " + b);
-        double A = fa.calculate();
-        double B = fb.calculate();
+        Argument x = new Argument("x");
+        Expression funcion = new Expression(f, x);
+
+        x.setArgumentValue(a);
+        double A = funcion.calculate();
+
+        x.setArgumentValue(b);
+        double B = funcion.calculate();
+
+        System.out.println("f(a) = " + A);
+        System.out.println("f(b) = " + B);
+
         if (A * B > 0) {
             System.out.println("Error: f(a) y f(b) tienen el mismo signo. No se garantiza raíz.");
             return false;

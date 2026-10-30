@@ -1,9 +1,10 @@
 package metodosdirectos;
 
 import funcionmatematica.Funcion;
+import org.mariuszgromada.math.mxparser.Expression;
 
 public class RegulaFalsi extends CondicionMetodoDirectos{
-    public RegulaFalsi(double a, double b, double epsilon,Funcion f){
+    public RegulaFalsi(double a, double b, double epsilon,String f){
         super(a,b,epsilon,f);
     }
     public double resolver() {
@@ -13,17 +14,29 @@ public class RegulaFalsi extends CondicionMetodoDirectos{
 
         double aActual = this.a;
         double bActual = this.b;
+        Expression fa = new Expression(f + " | x = " + aActual);
+        Expression fb = new Expression(f + " | x = " + bActual);
+        double FA = fa.calculate();
+        double FB = fb.calculate();
 
-        double c = (aActual * f.evaluar(bActual) - bActual * f.evaluar(aActual)) / (f.evaluar(bActual) - f.evaluar(aActual));
+        double c = (aActual * FB - bActual * FA) / (FB - FA);
 
-        while (Math.abs(f.evaluar(c)) > epsilon) {
-            if (f.evaluar(aActual) * f.evaluar(c) < 0) {
+        Expression fc = new Expression(f + " | x = " + c);
+        double FC= fc.calculate();
+
+        while (Math.abs(FC) > epsilon) {
+            if (FA * FC < 0) {
                 bActual = c;
             } else {
                 aActual = c;
             }
+            fa = new Expression(f + " | x = " + aActual);
+            fb = new Expression(f + " | x = " + bActual);
+            FA = fa.calculate();
+            FB = fb.calculate();
 
-            c = (aActual * f.evaluar(bActual) - bActual * f.evaluar(aActual)) / (f.evaluar(bActual) - f.evaluar(aActual));
+            System.out.println(c);
+            c = (aActual * FB - bActual * FA) / (FB - FA);
         }
 
         System.out.println("Regula Falsi - Raíz encontrada c: " + c);

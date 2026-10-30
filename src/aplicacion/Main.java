@@ -2,9 +2,11 @@ package aplicacion;
 import funcionmatematica.Funcion;
 import metodosindirectos.*;
 import metodosdirectos.*;
+import org.mariuszgromada.math.mxparser.License;
 
 public class Main {
     public static void main(String[] args) {
+        License.iConfirmNonCommercialUse("TU NOMBRE");
         // Aquí se pueden crear instancias de clases y probar los métodos
         Funcion f = new Funcion() {
             @Override
@@ -39,10 +41,19 @@ public class Main {
         };
     double x0 = 0.5; // Valor inicial
     double epsilon = 0.0001; // Tolerancia
-    System.out.println("Método de Biseccion:");
-    String f = "2*x+1";
-    Biseccion biseccion = new Biseccion(1.0,2.0,0.001,f);
+    double a = -2;
+    double b = 1;
+
+    String funcion = "2*x+1";
+    System.out.println("Funcion matematica: "+funcion);
+    Biseccion biseccion = new Biseccion(a,b,0.001,funcion);
     double resultado = biseccion.resolver();
-    System.out.println("Resultado: " + resultado);
+
+    RegulaFalsi regula = new RegulaFalsi(a,b,0.001,funcion);
+    resultado = regula.resolver();
+
+    RegulaFalsiModificada regulaMod = new RegulaFalsiModificada(a,b,0.001,funcion);
+    resultado = regulaMod.resolver();
+
     }
 }

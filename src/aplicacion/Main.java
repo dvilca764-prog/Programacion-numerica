@@ -2,6 +2,8 @@ package aplicacion;
 import funcionmatematica.Funcion;
 import metodosindirectos.*;
 //ola
+//:v
+//:v
 public class Main {
     public static void main(String[] args) {
         // Aquí se pueden crear instancias de clases y probar los métodos

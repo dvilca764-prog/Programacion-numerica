@@ -40,16 +40,17 @@ public class Main {
             }
         };
     double x0 = 0.5; // Valor inicial
-    double epsilon = 0.0001; // Tolerancia
-    double a = -2;
-    double b = 1;
+    double epsilon = 0.00000000001; // Tolerancia
+    double a = -4;
+    double b = 0;
 
-    String funcion = "2*x+1";
+    String funcion = "x^2-1.5";
     System.out.println("Funcion matematica: "+funcion);
-    Biseccion biseccion = new Biseccion(a,b,0.001,funcion);
+
+    Biseccion biseccion = new Biseccion(a,b,epsilon,funcion);
     double resultado = biseccion.resolver();
 
-    RegulaFalsi regula = new RegulaFalsi(a,b,0.001,funcion);
+    RegulaFalsi regula = new RegulaFalsi(a,b,epsilon,funcion);
     resultado = regula.resolver();
 
     RegulaFalsiModificada regulaMod = new RegulaFalsiModificada(a,b,0.001,funcion);

@@ -1,5 +1,6 @@
 package metodosdirectos;
 import funcionmatematica.Funcion;
+import org.mariuszgromada.math.mxparser.Argument;
 import org.mariuszgromada.math.mxparser.Expression;
 
 public class RegulaFalsiModificada extends CondicionMetodoDirectos{
@@ -14,31 +15,40 @@ public class RegulaFalsiModificada extends CondicionMetodoDirectos{
         double aActual = this.a;
         double bActual = this.b;
 
-        Expression fa = new Expression(f + " | x = " + aActual);
-        Expression fb = new Expression(f + " | x = " + bActual);
-        double FA = fa.calculate();
-        double FB = fb.calculate();
-        double W = fa.calculate();
+        Argument x = new Argument("x");
+        Expression funcion = new Expression(f, x);
+
+        x.setArgumentValue(aActual);
+        double FA = funcion.calculate();
+
+        x.setArgumentValue(bActual);
+        double FB = funcion.calculate();
+
+        double W = FA;
 
         double fValue = FA;
         double gValue = FB;
-        //double w = f.evaluar(aActual);
 
         double c = (aActual * FB - bActual * FA) / (FB - FA);
 
-        Expression fc = new Expression(f + " | x = " + c);
-        double FC = fc.calculate();
+        x.setArgumentValue(c);
+        double FC = funcion.calculate();
+        int iters = 0;
 
         while (Math.abs(FC) > epsilon) {
+            iters++;
             if (FA * FC < 0) {
                 bActual = c;
                 gValue = FC;
+
                 if (W * gValue > 0) {
                     fValue = fValue / 2.0;
                 }
+
             } else {
                 aActual = c;
                 fValue = FC;
+
                 if (W * fValue > 0) {
                     gValue = gValue / 2.0;
                 }
@@ -46,15 +56,13 @@ public class RegulaFalsiModificada extends CondicionMetodoDirectos{
 
             W = FC;
 
-            fa = new Expression(f + " | x = " + aActual);
-            fb = new Expression(f + " | x = " + bActual);
-            FA = fa.calculate();
-            FB = fb.calculate();
-
             c = (aActual * gValue - bActual * fValue) / (gValue - fValue);
+
+            x.setArgumentValue(c);
+            FC = funcion.calculate();
         }
 
-        System.out.println("Regula Falsi Modificada - Raíz encontrada c: " + c);
+        System.out.println("Regula Falsi Modificada - Raíz aproximada: " + c +"\niteraciones: "+iters);
         return c;
     }
 }

@@ -23,8 +23,8 @@ public abstract class CondicionMetodoDirectos {
         x.setArgumentValue(b);
         double B = funcion.calculate();
 
-        System.out.println("f(a) = " + A);
-        System.out.println("f(b) = " + B);
+        /*System.out.println("f(a) = " + A);
+        System.out.println("f(b) = " + B);*/
 
         if (A * B > 0) {
             System.out.println("Error: f(a) y f(b) tienen el mismo signo. No se garantiza raíz.");

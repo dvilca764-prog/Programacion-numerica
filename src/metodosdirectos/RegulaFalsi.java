@@ -1,6 +1,7 @@
 package metodosdirectos;
 
 import funcionmatematica.Funcion;
+import org.mariuszgromada.math.mxparser.Argument;
 import org.mariuszgromada.math.mxparser.Expression;
 
 public class RegulaFalsi extends CondicionMetodoDirectos{
@@ -14,32 +15,39 @@ public class RegulaFalsi extends CondicionMetodoDirectos{
 
         double aActual = this.a;
         double bActual = this.b;
-        Expression fa = new Expression(f + " | x = " + aActual);
-        Expression fb = new Expression(f + " | x = " + bActual);
-        double FA = fa.calculate();
-        double FB = fb.calculate();
+
+        Argument x = new Argument("x");
+        Expression funcion = new Expression(f, x);
+
+        x.setArgumentValue(aActual);
+        double FA = funcion.calculate();
+
+        x.setArgumentValue(bActual);
+        double FB = funcion.calculate();
 
         double c = (aActual * FB - bActual * FA) / (FB - FA);
 
-        Expression fc = new Expression(f + " | x = " + c);
-        double FC= fc.calculate();
+        x.setArgumentValue(c);
+        double FC = funcion.calculate();
+        int iters = 0;
 
         while (Math.abs(FC) > epsilon) {
+            iters++;
             if (FA * FC < 0) {
                 bActual = c;
+                FB = FC;
             } else {
                 aActual = c;
+                FA = FC;
             }
-            fa = new Expression(f + " | x = " + aActual);
-            fb = new Expression(f + " | x = " + bActual);
-            FA = fa.calculate();
-            FB = fb.calculate();
 
-            System.out.println(c);
             c = (aActual * FB - bActual * FA) / (FB - FA);
+
+            x.setArgumentValue(c);
+            FC = funcion.calculate();
         }
 
-        System.out.println("Regula Falsi - Raíz encontrada c: " + c);
+        System.out.println("Regula Falsi - Raíz aproximada: " + c +"\niteraciones: "+iters);
         return c;
     }
 }

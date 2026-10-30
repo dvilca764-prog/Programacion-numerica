@@ -1,20 +1,24 @@
 package metodosdirectos;
-import funcionmatematica.Funcion;
+import org.mariuszgromada.math.mxparser.*;
 
 public abstract class CondicionMetodoDirectos {
     protected double a;
     protected double b;
     protected double epsilon;
-    protected Funcion f;
+    protected String f;
 
-    public CondicionMetodoDirectos(double a,double b,double epsilon,Funcion f){
+    public CondicionMetodoDirectos(double a,double b,double epsilon,String f){
         this.a=a;
         this.b=b;
         this.epsilon=epsilon;
         this.f=f;
     }
     public boolean evaluarCondicion() {
-        if (f.evaluar(a) * f.evaluar(b) > 0) {
+        Expression fa = new Expression(f + " | x = " + a);
+        Expression fb = new Expression(f + " | x = " + b);
+        double A = fa.calculate();
+        double B = fb.calculate();
+        if (A * B > 0) {
             System.out.println("Error: f(a) y f(b) tienen el mismo signo. No se garantiza raíz.");
             return false;
         }

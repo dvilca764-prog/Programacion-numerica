@@ -1,6 +1,7 @@
 package aplicacion;
 import funcionmatematica.Funcion;
 import metodosindirectos.*;
+import metodosdirectos.*;
 
 public class Main {
     public static void main(String[] args) {
@@ -38,9 +39,10 @@ public class Main {
         };
     double x0 = 0.5; // Valor inicial
     double epsilon = 0.0001; // Tolerancia
-    System.out.println("Método de Newton-Raphson:");
-    Newton newton = new Newton(x0, epsilon, f, f.derivada());
-    double resultado = newton.resolver();
+    System.out.println("Método de Biseccion:");
+    String f = "2*x+1";
+    Biseccion biseccion = new Biseccion(1.0,2.0,0.001,f);
+    double resultado = biseccion.resolver();
     System.out.println("Resultado: " + resultado);
     }
 }

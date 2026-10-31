@@ -6,6 +6,13 @@ public class PuntoFijo extends CondicionMetodoIndirectos{
         super(x0, epsilon, f);
     }
 
+    /*public boolean CondicionPuntoFijo(){
+        Argument x = new Argument("x");
+        Expression funcion = new Expression(f, x);
+        x.setArgumentValue(c);
+        return true;
+    }*/
+
     public double resolver(){
         double xs = getX0();
         int iteracion = 0;

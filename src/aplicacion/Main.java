@@ -6,55 +6,31 @@ import org.mariuszgromada.math.mxparser.License;
 
 public class Main {
     public static void main(String[] args) {
-        License.iConfirmNonCommercialUse("TU NOMBRE");
-        // Aquí se pueden crear instancias de clases y probar los métodos
-        Funcion f = new Funcion() {
-            @Override
-            public double evaluar(double x) {
-                return Math.log(x) - 1 - 1/x; // Ejemplo: f(x) = ln(x) - 1 - 1/x
-            }
+        License.iConfirmNonCommercialUse("Tilin");
 
-            @Override
-            public Funcion derivada() {
-                return new Funcion() {
-                    @Override
-                    public double evaluar(double x) {
-                        return 1/x + 1/Math.pow(x, 2); // Derivada: f'(x) = 1/x + 1/x^2
-                    }
+        //Metodos directos
+        double epsilon = 0.00000001;
+        double a = -10;
+        double b = 0;
 
-                    @Override
-                    public Funcion derivada() {
-                        return new Funcion() {
-                            @Override
-                            public double evaluar(double x) {
-                                return 2/Math.pow(x, 3); // Segunda derivada: f''(x) = 2/x^3
-                            }
+        String funcion = "x^2-1.5";
+        System.out.println("Funcion matematica: "+funcion);
 
-                            @Override
-                            public Funcion derivada() {
-                                return null; // No hay tercera derivada en este caso
-                            }
-                        };
-                    }
-                };
-            }
-        };
-    double x0 = 0.5; // Valor inicial
-    double epsilon = 0.00000000001; // Tolerancia
-    double a = -4;
-    double b = 0;
+        Biseccion biseccion = new Biseccion(a,b,epsilon,funcion);
+        double resultado = biseccion.resolver();
 
-    String funcion = "x^2-1.5";
-    System.out.println("Funcion matematica: "+funcion);
+        RegulaFalsi regula = new RegulaFalsi(a,b,epsilon,funcion);
+        resultado = regula.resolver();
 
-    Biseccion biseccion = new Biseccion(a,b,epsilon,funcion);
-    double resultado = biseccion.resolver();
+        RegulaFalsiModificada regulaMod = new RegulaFalsiModificada(a,b,epsilon,funcion);
+        resultado = regulaMod.resolver();
 
-    RegulaFalsi regula = new RegulaFalsi(a,b,epsilon,funcion);
-    resultado = regula.resolver();
+        //Metodos indirectos
+        double x0 = 0.5; // Valor inicial
+        epsilon = 0.00000001; // Tolerancia
 
-    RegulaFalsiModificada regulaMod = new RegulaFalsiModificada(a,b,0.001,funcion);
-    resultado = regulaMod.resolver();
+        funcion = "x^2-1.5";
+        System.out.println("Funcion matematica: "+funcion);
 
     }
 }

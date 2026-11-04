@@ -78,6 +78,7 @@ public class VentanaNumericaApp extends Application {
     // ================================================================== START
     @Override
     public void start(Stage stage) {
+        //stage.initStyle(javafx.stage.StageStyle.DECORATED);
         stage.setTitle("Métodos Numéricos · Búsqueda de raíces");
 
         BorderPane root = new BorderPane();
@@ -85,12 +86,14 @@ public class VentanaNumericaApp extends Application {
         root.setLeft(crearPanelIzquierdo());
         root.setCenter(crearPanelDerecho());
 
-        Scene scene = new Scene(root, 1280, 780);
+        Scene scene = new Scene(root, 1000, 650);
         scene.getStylesheets().add(cargarCss());
         stage.setScene(scene);
         stage.setMinWidth(1000);
         stage.setMinHeight(650);
         stage.show();
+        stage.centerOnScreen();
+        stage.setMaximized(true);
 
         cargarEjemplo(EJEMPLOS.get(0));
         actualizarVisibilidad();

@@ -15,6 +15,8 @@ public class Secante extends CondicionMetodoIndirectos {
         double xk = this.x1;        // x_k
         int iteracion = 0;
         double error = Double.MAX_VALUE;
+        registrar(0, xkMenos1, Double.NaN);
+        registrar(1, xk, Math.abs(xk - xkMenos1));
 
         while (iteracion < maxIteraciones && error > getEpsilon()) {
 
@@ -37,6 +39,7 @@ public class Secante extends CondicionMetodoIndirectos {
             xkMenos1 = xk;
             xk = xkSiguiente;
             iteracion++;
+            registrar(iteracion + 1, xk, error);
         }
 
         System.out.println("Iteraciones: " + iteracion);

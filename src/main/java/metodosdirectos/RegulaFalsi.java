@@ -29,8 +29,10 @@ public class RegulaFalsi extends CondicionMetodoDirectos{
         x.setArgumentValue(c);
         double FC = funcion.calculate();
         int iters = 0;
+        double cPrev = c;
+        registrar(1, aActual, bActual, c, FC, Double.NaN);
 
-        while (Math.abs(FC) > epsilon) {
+        while (Math.abs(FC) > epsilon && iters < maxIter) {
             iters++;
             if (FA * FC < 0) {
                 bActual = c;
@@ -44,6 +46,8 @@ public class RegulaFalsi extends CondicionMetodoDirectos{
 
             x.setArgumentValue(c);
             FC = funcion.calculate();
+            registrar(iters + 1, aActual, bActual, c, FC, Math.abs(c - cPrev));
+            cPrev = c;
         }
 
         System.out.println("Regula Falsi - Raíz aproximada: " + c +"\niteraciones: "+iters);

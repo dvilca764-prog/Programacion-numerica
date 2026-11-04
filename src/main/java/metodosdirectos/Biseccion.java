@@ -19,8 +19,9 @@ public class Biseccion extends CondicionMetodoDirectos{
         double FC = funcion.calculate();
         double FA;
         int iters = 0;
+        registrar(1, aActual, bActual, c, FC, (bActual - aActual) / 2.0);
 
-        while (Math.abs(FC) > epsilon) {
+        while (Math.abs(FC) > epsilon && iters < maxIter) {
             //System.out.println("c = "+c);
             iters++;
             x.setArgumentValue(aActual);
@@ -33,6 +34,7 @@ public class Biseccion extends CondicionMetodoDirectos{
             c = (aActual + bActual) / 2.0;
             x.setArgumentValue(c);
             FC = funcion.calculate();
+            registrar(iters + 1, aActual, bActual, c, FC, (bActual - aActual) / 2.0);
         }
 
         System.out.println("Bisección - Raíz aproximada: " + c +"\niteraciones: "+iters);

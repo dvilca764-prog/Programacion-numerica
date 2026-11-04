@@ -11,6 +11,7 @@ public class Aitken extends PuntoFijo {
         double xOriginal = getX0();
         int iteracion = 0;
         double error = Double.MAX_VALUE;
+        registrar(0, xOriginal, Double.NaN);
 
         while (iteracion < maxIteraciones && error > getEpsilon()) {
             // Evaluamos x1 y x2 usando el método 'evaluar' heredado (mxparser)
@@ -30,6 +31,7 @@ public class Aitken extends PuntoFijo {
             error = Math.abs(xAcelerado - xOriginal);
             xOriginal = xAcelerado;
             iteracion++;
+            registrar(iteracion, xOriginal, error);
         }
 
         System.out.println("Aitken - Raíz aproximada: " + xOriginal);

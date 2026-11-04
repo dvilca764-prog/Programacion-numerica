@@ -12,6 +12,7 @@ public class Halley extends CondicionMetodoIndirectos {
     public double resolver(int maxIteraciones) {
         double xs = getX0();
         double error = Double.MAX_VALUE;
+        registrar(0, xs, Double.NaN);
         int iteracion = 0;
 
         while (iteracion < maxIteraciones && error > getEpsilon()) {
@@ -43,6 +44,7 @@ public class Halley extends CondicionMetodoIndirectos {
             xs = xs - (numerador / denominador);
             error = Math.abs(xs - xAnterior);
             iteracion++;
+            registrar(iteracion, xs, error);
         }
 
         System.out.println("Iteraciones: " + iteracion);

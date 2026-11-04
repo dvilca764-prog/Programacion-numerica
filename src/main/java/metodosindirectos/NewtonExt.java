@@ -13,6 +13,7 @@ public class NewtonExt extends CondicionMetodoIndirectos {
         double xs = getX0();
         int iteracion = 0;
         double error = Double.MAX_VALUE;
+        registrar(0, xs, Double.NaN);
 
         while (iteracion < maxIteraciones && error > getEpsilon()) {
             double xAnterior = xs;
@@ -46,6 +47,7 @@ public class NewtonExt extends CondicionMetodoIndirectos {
             xs = xs - (numerador / denominador);
             error = Math.abs(xs - xAnterior);
             iteracion++;
+            registrar(iteracion, xs, error);
         }
 
         System.out.println("Iteraciones: " + iteracion);

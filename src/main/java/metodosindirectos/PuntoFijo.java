@@ -11,6 +11,7 @@ public class PuntoFijo extends CondicionMetodoIndirectos {
         double xs = getX0();
         int iteracion = 0;
         double error = Double.MAX_VALUE;
+        registrar(0, xs, Double.NaN);
 
         while (iteracion < maxIteraciones && error > getEpsilon()) {
             // Evaluamos la expresión de texto directamente con mxparser mediante la clase padre
@@ -19,6 +20,7 @@ public class PuntoFijo extends CondicionMetodoIndirectos {
             error = Math.abs(xn - xs);
             xs = xn;
             iteracion++;
+            registrar(iteracion, xs, error);
         }
 
         System.out.println("Iteraciones: " + iteracion);

@@ -11,6 +11,7 @@ public class Steffensen extends PuntoFijo {
         double x0 = getX0();
         int iteracion = 0;
         double error = Double.MAX_VALUE;
+        registrar(0, x0, Double.NaN);
 
         while (iteracion < maxIteraciones && error > getEpsilon()) {
             // Evaluamos x1 y x2 usando directamente el método 'evaluar' heredado (mXparser)
@@ -30,6 +31,7 @@ public class Steffensen extends PuntoFijo {
             error = Math.abs(xNuevo - x0);
             x0 = xNuevo;
             iteracion++;
+            registrar(iteracion, x0, error);
         }
 
         System.out.println("Steffensen - Raíz aproximada: " + x0 + " en " + iteracion + " iteraciones.");

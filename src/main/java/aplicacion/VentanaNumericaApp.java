@@ -4,11 +4,15 @@ import aplicacion.MotorNumerico.Fila;
 import aplicacion.MotorNumerico.Metodo;
 import aplicacion.MotorNumerico.Resultado;
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
+import javafx.geometry.Point2D;
+import javafx.scene.input.MouseButton;
+import javafx.scene.layout.Region;
 import javafx.scene.Scene;
 import javafx.scene.chart.LineChart;
 import javafx.scene.chart.NumberAxis;
@@ -48,6 +52,15 @@ public class VentanaNumericaApp extends Application {
     private HBox leyenda;
     private Tab tabTabla;
 
+    // Vista interactiva: una unidad tiene el mismo tamaño en X e Y.
+    private boolean vistaInicializada = false;
+    private double centroX, centroY, unidadesPorPixel;
+    private double arrastreX, arrastreY;
+    private boolean arrastrando = false;
+    private Region zonaTrazado;
+    private double ultimoAnchoTrazado = -1, ultimoAltoTrazado = -1;
+
+
     // ---------------------------------------------- estado de la última corrida
     private DoubleUnaryOperator ultimaF, ultimaG;
     private Metodo ultimoMetodo;
@@ -78,7 +91,6 @@ public class VentanaNumericaApp extends Application {
     // ================================================================== START
     @Override
     public void start(Stage stage) {
-        //stage.initStyle(javafx.stage.StageStyle.DECORATED);
         stage.setTitle("Métodos Numéricos · Búsqueda de raíces");
 
         BorderPane root = new BorderPane();
@@ -86,14 +98,13 @@ public class VentanaNumericaApp extends Application {
         root.setLeft(crearPanelIzquierdo());
         root.setCenter(crearPanelDerecho());
 
-        Scene scene = new Scene(root, 1000, 650);
+        Scene scene = new Scene(root, 1280, 780);
         scene.getStylesheets().add(cargarCss());
         stage.setScene(scene);
         stage.setMinWidth(1000);
         stage.setMinHeight(650);
-        stage.show();
-        stage.centerOnScreen();
         stage.setMaximized(true);
+        stage.show();
 
         cargarEjemplo(EJEMPLOS.get(0));
         actualizarVisibilidad();
@@ -309,6 +320,7 @@ public class VentanaNumericaApp extends Application {
         grafico.setCreateSymbols(true);
         grafico.setTitle("Comportamiento de la función");
         VBox.setVgrow(grafico, Priority.ALWAYS);
+        instalarNavegacionGrafico();
 
         VBox v = new VBox(6, barra, grafico);
         v.getStyleClass().add("panel-grafica");
@@ -417,6 +429,7 @@ public class VentanaNumericaApp extends Application {
             ultimoA = a; ultimoB = b; ultimoX0 = x0; ultimoX1 = x1;
 
             mostrarResultado(m, r);
+            vistaInicializada = false; // Nuevo problema: centrar de nuevo la vista.
             dibujar();
 
         } catch (IllegalArgumentException ex) {
@@ -523,7 +536,30 @@ public class VentanaNumericaApp extends Application {
         double uy = pasoLindo((hi - lo) / 8.0);
         lo = Math.floor(lo / uy) * uy;
         hi = Math.ceil(hi / uy) * uy;
+        // La vista conserva una proporción 1:1 en unidades/píxel.
+        // El rango vertical automático anterior se usa solo para elegir el centro inicial.
+        if (!vistaInicializada) {
+            centroX = (xmin + xmax) / 2.0;
+            centroY = (lo + hi) / 2.0;
+            double ancho = anchoTrazado();
+            unidadesPorPixel = (xmax - xmin) / ancho;
+            vistaInicializada = true;
+        }
+        double ancho = anchoTrazado();
+        double alto = altoTrazado();
+        xmin = centroX - ancho * unidadesPorPixel / 2.0;
+        xmax = centroX + ancho * unidadesPorPixel / 2.0;
+        lo = centroY - alto * unidadesPorPixel / 2.0;
+        hi = centroY + alto * unidadesPorPixel / 2.0;
+        ux = pasoLindo((xmax - xmin) / 10.0);
+        uy = pasoLindo((hi - lo) / 8.0);
         double tope = 5 * (hi - lo);
+        // Volver a muestrear la función en el rango visible tras mover o hacer zoom.
+        for (int i = 0; i <= N; i++) {
+            xs[i] = xmin + (xmax - xmin) * i / N;
+            fy[i] = ultimaF.applyAsDouble(xs[i]);
+            gy[i] = fp ? ultimaG.applyAsDouble(xs[i]) : Double.NaN;
+        }
 
         XYChart.Series<Number, Number> sF = new XYChart.Series<>();
         XYChart.Series<Number, Number> sG = new XYChart.Series<>();
@@ -597,6 +633,99 @@ public class VentanaNumericaApp extends Application {
         if (!sCob.getData().isEmpty()) leyenda.getChildren().add(itemLeyenda(COLOR[4], "telaraña", false));
         if (!sIt.getData().isEmpty()) leyenda.getChildren().add(itemLeyenda(COLOR[5], "iteraciones", false));
         if (!sRaiz.getData().isEmpty()) leyenda.getChildren().add(itemLeyenda(COLOR[6], "raíz", false));
+    }
+
+    // ================================================= NAVEGACIÓN DEL GRÁFICO
+    private Region obtenerZonaTrazado() {
+        if (zonaTrazado == null && grafico != null) {
+            Node nodo = grafico.lookup(".chart-plot-background");
+            if (nodo instanceof Region) zonaTrazado = (Region) nodo;
+        }
+        return zonaTrazado;
+    }
+
+    private double anchoTrazado() {
+        Region z = obtenerZonaTrazado();
+        return z != null && z.getWidth() > 1 ? z.getWidth() : 600;
+    }
+
+    private double altoTrazado() {
+        Region z = obtenerZonaTrazado();
+        return z != null && z.getHeight() > 1 ? z.getHeight() : 380;
+    }
+
+    private boolean dentroZona(double escenaX, double escenaY) {
+        Region z = obtenerZonaTrazado();
+        if (z == null) return false;
+        Point2D p = z.sceneToLocal(escenaX, escenaY);
+        return p.getX() >= 0 && p.getX() <= z.getWidth()
+                && p.getY() >= 0 && p.getY() <= z.getHeight();
+    }
+
+    private void instalarNavegacionGrafico() {
+        grafico.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_PRESSED, e -> {
+            if (e.getButton() != MouseButton.PRIMARY || !vistaInicializada
+                    || !dentroZona(e.getSceneX(), e.getSceneY())) return;
+            arrastrando = true;
+            arrastreX = e.getSceneX();
+            arrastreY = e.getSceneY();
+            e.consume();
+        });
+
+        grafico.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_DRAGGED, e -> {
+            if (!arrastrando) return;
+            centroX -= (e.getSceneX() - arrastreX) * unidadesPorPixel;
+            centroY += (e.getSceneY() - arrastreY) * unidadesPorPixel;
+            arrastreX = e.getSceneX();
+            arrastreY = e.getSceneY();
+            dibujar();
+            e.consume();
+        });
+
+        grafico.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_RELEASED, e -> {
+            if (arrastrando) {
+                arrastrando = false;
+                e.consume();
+            }
+        });
+
+        grafico.addEventFilter(javafx.scene.input.ScrollEvent.SCROLL, e -> {
+            if (!vistaInicializada || e.getDeltaY() == 0
+                    || !dentroZona(e.getSceneX(), e.getSceneY())) return;
+            Region z = obtenerZonaTrazado();
+            Point2D p = z.sceneToLocal(e.getSceneX(), e.getSceneY());
+            double puntoX = centroX + (p.getX() - z.getWidth() / 2) * unidadesPorPixel;
+            double puntoY = centroY - (p.getY() - z.getHeight() / 2) * unidadesPorPixel;
+            double factor = e.getDeltaY() > 0 ? 0.85 : 1.0 / 0.85;
+            double nuevaEscala = unidadesPorPixel * factor;
+            if (nuevaEscala < 1e-10 || nuevaEscala > 1e8) return;
+            centroX = puntoX + (centroX - puntoX) * factor;
+            centroY = puntoY + (centroY - puntoY) * factor;
+            unidadesPorPixel = nuevaEscala;
+            dibujar();
+            e.consume();
+        });
+
+        // Cuando se maximiza o cambia el tamaño de la ventana, conservar la escala 1:1.
+        grafico.widthProperty().addListener((obs, antes, ahora) -> reajustarVistaPorTamano());
+        grafico.heightProperty().addListener((obs, antes, ahora) -> reajustarVistaPorTamano());
+    }
+
+    private boolean reajustePendiente = false;
+    private void reajustarVistaPorTamano() {
+        if (reajustePendiente) return;
+        reajustePendiente = true;
+        Platform.runLater(() -> {
+            reajustePendiente = false;
+            if (!vistaInicializada || ultimaF == null) return;
+            double ancho = anchoTrazado(), alto = altoTrazado();
+            if (Math.abs(ancho - ultimoAnchoTrazado) > 3
+                    || Math.abs(alto - ultimoAltoTrazado) > 3) {
+                ultimoAnchoTrazado = ancho;
+                ultimoAltoTrazado = alto;
+                dibujar();
+            }
+        });
     }
 
     private Node itemLeyenda(String color, String texto, boolean punteado) {

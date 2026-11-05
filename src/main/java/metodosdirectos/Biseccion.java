@@ -1,43 +1,46 @@
-package metodosdirectos;
-import org.mariuszgromada.math.mxparser.Argument;
-import org.mariuszgromada.math.mxparser.Expression;
 
-public class Biseccion extends CondicionMetodoDirectos{
-    public Biseccion(double a,double b,double epsilon,String f){
-        super(a,b,epsilon,f);
+package metodosdirectos;
+
+public class Biseccion extends CondicionMetodoDirectos {
+
+    public Biseccion(double a, double b, double epsilon, String f) {
+        super(a, b, epsilon, f);
     }
+
     public double resolver() {
         if (!evaluarCondicion()) {
             return Double.NaN;
         }
+
         double aActual = this.a;
         double bActual = this.b;
         double c = (aActual + bActual) / 2.0;
-        Argument x = new Argument("x");
-        Expression funcion = new Expression(f, x);
-        x.setArgumentValue(c);
-        double FC = funcion.calculate();
-        double FA;
+
+        double FC = evaluar(c);
         int iters = 0;
+
         registrar(1, aActual, bActual, c, FC, (bActual - aActual) / 2.0);
 
         while (Math.abs(FC) > epsilon && iters < maxIter) {
-            //System.out.println("c = "+c);
             iters++;
-            x.setArgumentValue(aActual);
-            FA = funcion.calculate();
+
+            double FA = evaluar(aActual);
+
             if (FA * FC < 0) {
                 bActual = c;
             } else {
                 aActual = c;
             }
+
             c = (aActual + bActual) / 2.0;
-            x.setArgumentValue(c);
-            FC = funcion.calculate();
+            FC = evaluar(c);
+
             registrar(iters + 1, aActual, bActual, c, FC, (bActual - aActual) / 2.0);
         }
 
-        System.out.println("Bisección - Raíz aproximada: " + c +"\niteraciones: "+iters);
+        System.out.println("Bisección - Raíz aproximada: " + c
+                + "\niteraciones: " + iters);
+
         return c;
     }
 }

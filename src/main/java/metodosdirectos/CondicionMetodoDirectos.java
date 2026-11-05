@@ -47,5 +47,11 @@ public abstract class CondicionMetodoDirectos {
         }
         return true;
     }
+    protected double evaluar(double valorX) {
+        Argument x = new Argument("x");
+        Expression funcion = new Expression(f, x);
+        x.setArgumentValue(valorX);
+        return funcion.calculate();
+    }
     public abstract double resolver();
 }

@@ -15,6 +15,13 @@
     </properties>
 
     <dependencies>
+        <!-- Symja para derivación simbólica -->
+        <dependency>
+            <groupId>org.matheclipse</groupId>
+            <artifactId>matheclipse-core</artifactId>
+            <version>3.2.0</version>
+        </dependency>
+
         <!-- Librería mXparser para evaluar texto plano de funciones -->
         <dependency>
             <groupId>org.mariuszgromada.math</groupId>

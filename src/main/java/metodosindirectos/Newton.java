@@ -41,6 +41,12 @@ public class Newton extends CondicionMetodoIndirectos {
 
             // 1. Evaluamos f(x) directamente usando el método 'evaluar' heredado
             double fx = evaluar(xs);
+            if (!Double.isFinite(fx)) return Double.NaN;
+            // Antes de dividir, comprobar si la aproximación ya es una raíz.
+            if (Math.abs(fx) <= getEpsilon()) {
+                registrar(iteracion + 1, xs, 0.0);
+                return xs;
+            }
 
             // 2. Creamos el argumento x para calcular la derivada con mxparser
             Argument x = new Argument("x");
@@ -51,7 +57,7 @@ public class Newton extends CondicionMetodoIndirectos {
             double dfx = exprDF.calculate();
 
             // Protección contra división por cero (derivada nula)
-            if (Math.abs(dfx) < 1e-15) {
+            if (!Double.isFinite(dfx) || Math.abs(dfx) < 1e-15) {
                 System.out.println("Error: Derivada nula en el método de Newton.");
                 return Double.NaN;
             }
@@ -59,6 +65,7 @@ public class Newton extends CondicionMetodoIndirectos {
             // Fórmula de Newton-Raphson: x_{k+1} = x_k - [f(x_k) / f'(x_k)]
             xs = xs - (fx / dfx);
 
+            if (!Double.isFinite(xs)) return Double.NaN;
             error = Math.abs(xs - xAnterior);
             iteracion++;
             registrar(iteracion, xs, error);
@@ -69,42 +76,3 @@ public class Newton extends CondicionMetodoIndirectos {
         return xs;
     }
 }
-
-/*package metodosindirectos;
-import funcionmatematica.Funcion;
-
-public class Newton extends CondicionMetodoIndirectos{
-    private Funcion df;
-    public Newton(double x0, double epsilon, Funcion f, Funcion df){
-        super(x0, epsilon, f);
-        this.df = df;
-    }
-
-    public double resolver(){
-        double xs = getX0();
-        // Se evalúa Fourier antes de iniciar las iteraciones de Newton.
-        valorFInicial = evaluar(xs);
-        Argument xInicial = new Argument("x");
-        xInicial.setArgumentValue(xs);
-        valorPrimeraDerivada = new Expression("der(" + f + ",x)", xInicial).calculate();
-        valorSegundaDerivada = new Expression("der(der(" + f + ",x),x)", xInicial).calculate();
-        fourierCumplido = Double.isFinite(valorFInicial * valorSegundaDerivada)
-                && valorFInicial * valorSegundaDerivada > 0
-                && Double.isFinite(valorPrimeraDerivada) && Math.abs(valorPrimeraDerivada) > 1e-14;
-
-        int iteracion = 0;
-        double error = Double.MAX_VALUE;
-
-        while(iteracion < 100 && error > getEpsilon()){
-            double xant = xs;
-            xs = xs - (getF().evaluar(xs) / df.evaluar(xs));
-            error = Math.abs(xs - xant);
-            iteracion++;
-        }
-
-        System.out.println("Iteraciones: " + iteracion);
-        return xs;
-    }
-    
-}
-*/

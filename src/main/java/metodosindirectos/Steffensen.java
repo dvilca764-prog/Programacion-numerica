@@ -1,75 +1,51 @@
 package metodosindirectos;
 
+/** Aceleración de Steffensen para la iteración x = g(x). */
 public class Steffensen extends PuntoFijo {
 
-    public Steffensen(double x0, double epsilon, String f) {
-        super(x0, epsilon, f);
+    public Steffensen(double x0, double epsilon, String g) {
+        super(x0, epsilon, g);
     }
 
     @Override
     public double resolver(int maxIteraciones) {
-        double x0 = getX0();
-        int iteracion = 0;
-        double error = Double.MAX_VALUE;
-        registrar(0, x0, Double.NaN);
+        historial.clear();
+        double x = getX0();
+        double tolerancia = getEpsilon();
+        registrar(0, x, Double.NaN);
 
-        while (iteracion < maxIteraciones && error > getEpsilon()) {
-            // Evaluamos x1 y x2 usando directamente el método 'evaluar' heredado (mXparser)
-            double x1 = evaluar(x0);
-            double x2 = evaluar(x1);
+        for (int iteracion = 1; iteracion <= maxIteraciones; iteracion++) {
+            double x1 = evaluar(x);       // g(x)
+            if (!Double.isFinite(x1)) return Double.NaN;
 
-            double denominador = x2 - 2 * x1 + x0;
-
-            if (Math.abs(denominador) < 1e-15) {
-                System.out.println("Error: División por cero en el método de Steffensen.");
-                break;
+            // Si g(x) ya es indistinguible de x dentro de la tolerancia,
+            // el punto fijo está alcanzado, incluso si la fórmula acelerada
+            // tiene un denominador muy pequeño.
+            double residuoPuntoFijo = Math.abs(x1 - x);
+            if (residuoPuntoFijo <= tolerancia) {
+                registrar(iteracion, x1, residuoPuntoFijo);
+                return x1;
             }
 
-            // Fórmula de Steffensen
-            double xNuevo = x0 - Math.pow(x1 - x0, 2) / denominador;
+            double x2 = evaluar(x1);      // g(g(x))
+            if (!Double.isFinite(x2)) return Double.NaN;
 
-            error = Math.abs(xNuevo - x0);
-            x0 = xNuevo;
-            iteracion++;
-            registrar(iteracion, x0, error);
+            double denominador = x2 - 2.0 * x1 + x;
+            if (!Double.isFinite(denominador) || Math.abs(denominador) < 1e-15) {
+                // No afirmar convergencia si el residuo no cumple la tolerancia.
+                // Devolvemos la aproximación actual; MotorNumerico la marcará
+                // como no convergente porque el último error no se redujo.
+                return x;
+            }
+
+            double siguiente = x - (x1 - x) * (x1 - x) / denominador;
+            if (!Double.isFinite(siguiente)) return Double.NaN;
+
+            double error = Math.abs(siguiente - x);
+            x = siguiente;
+            registrar(iteracion, x, error);
+            if (error <= tolerancia) return x;
         }
-
-        System.out.println("Steffensen - Raíz aproximada: " + x0 + " en " + iteracion + " iteraciones.");
-        return x0;
+        return x;
     }
 }
-
-
-
-/*package metodosindirectos;
-import funcionmatematica.Funcion;
-
-public class Steffensen extends PuntoFijo{
-    public Steffensen(double x0, double epsilon, Funcion f){
-        super(x0, epsilon, f);
-    }
-
-    public double resolver() {
-        double x0 = getX0();
-        int iteracion = 0;
-        double error = Double.MAX_VALUE;
-
-        while (iteracion < 100 && error > getEpsilon()) {
-            double x1 = getF().evaluar(x0);
-            double x2 = getF().evaluar(x1);
-
-            double denominador = x2 - 2 * x1 + x0;
-            if (Math.abs(denominador) < 1e-15) break; // Evita división por cero
-
-            double xNuevo = x0 - Math.pow(x1 - x0, 2) / denominador;
-
-            error = Math.abs(xNuevo - x0);
-            x0 = xNuevo;
-            iteracion++;
-        }
-
-        System.out.println("Iteraciones: " + iteracion);
-        return x0;
-    }
-}
-*/

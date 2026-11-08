@@ -47,7 +47,7 @@ public final class MotorNumerico {
         public final int n;
         public final double a, b, x, fx, gx, error;
 
-        Fila(int n, double a, double b, double x, double fx, double gx, double error) {
+        public Fila(int n, double a, double b, double x, double fx, double gx, double error) {
             this.n = n;
             this.a = a;
             this.b = b;
@@ -64,6 +64,10 @@ public final class MotorNumerico {
         public boolean convergio = false;
         public boolean fallo = false;
         public String mensaje = "";
+        public String derivadaPrimera = "";
+        public String derivadaSegunda = "";
+        public String detalleFourier = "";
+        public String detalleConvergenciaPF = "";
         public int iter = 0;
 
         public int iteraciones() { return iter; }
@@ -121,23 +125,44 @@ public final class MotorNumerico {
     public static Resultado abierto(Metodo m, String textoF, String textoG,
                                     DoubleUnaryOperator f, DoubleUnaryOperator g,
                                     double x0, double x1, double tol, int maxIter) {
+        Resultado r = new Resultado();
+        r.derivadaPrimera = DerivadorSimbolico.derivarPrimera(textoF);
+        r.derivadaSegunda = DerivadorSimbolico.derivarSegunda(textoF);
+
         CondicionMetodoIndirectos met;
         switch (m) {
-            case NEWTON: met = new Newton(x0, tol, textoF); break;
+            case NEWTON:
+                met = new Newton(x0, tol, textoF);
+                break;
             case NEWTON_EXT: met = new NewtonExt(x0, tol, textoF); break;
             case HALLEY: met = new Halley(x0, tol, textoF); break;
             case SECANTE:
                 if (x0 == x1) return fallo("Para Secante, x0 y x1 deben ser distintos.");
                 met = new Secante(x0, x1, tol, textoF);
                 break;
-            case PUNTO_FIJO: met = new PuntoFijo(x0, tol, textoG); break;
+            case PUNTO_FIJO:
+                String gP = DerivadorSimbolico.derivarPrimera(textoG);
+                org.mariuszgromada.math.mxparser.Argument argX = new org.mariuszgromada.math.mxparser.Argument("x", x0);
+                org.mariuszgromada.math.mxparser.Expression expGP = new org.mariuszgromada.math.mxparser.Expression(gP, argX);
+                double valGP = Math.abs(expGP.calculate());
+                r.detalleConvergenciaPF = "g'(x) = " + gP + " | Evaluada en x₀=" + x0 + " -> |g'(x₀)| = " + valGP + (valGP < 1 ? " (< 1: Converge con éxito)" : " (>= 1: Riesgo de divergencia)");
+                met = new PuntoFijo(x0, tol, textoG);
+                break;
             case AITKEN: met = new Aitken(x0, tol, textoG); break;
             case STEFFENSEN: met = new Steffensen(x0, tol, textoG); break;
             default: return fallo("El método seleccionado no es abierto.");
         }
 
         double raiz = met.resolver(maxIter);
-        Resultado r = new Resultado();
+        if (met instanceof Newton) {
+            Newton n = (Newton) met;
+            r.detalleFourier = "Comprobación local en x₀=" + x0
+                    + ": f(x₀)=" + n.getValorFInicial()
+                    + ", f'(x₀)=" + n.getValorPrimeraDerivada()
+                    + ", f''(x₀)=" + n.getValorSegundaDerivada()
+                    + ", f(x₀)·f''(x₀)=" + (n.getValorFInicial() * n.getValorSegundaDerivada())
+                    + (n.isFourierCumplido() ? " -> se cumple la comprobación local." : " -> no se cumple la comprobación local.");
+        }
         r.raiz = raiz;
 
         for (double[] h : met.getHistorial()) {

@@ -4,6 +4,17 @@ import org.mariuszgromada.math.mxparser.*;
 
 public class Newton extends CondicionMetodoIndirectos {
 
+    // Comprobación local del criterio de Fourier en el punto inicial.
+    private double valorFInicial = Double.NaN;
+    private double valorPrimeraDerivada = Double.NaN;
+    private double valorSegundaDerivada = Double.NaN;
+    private boolean fourierCumplido;
+
+    public double getValorFInicial() { return valorFInicial; }
+    public double getValorPrimeraDerivada() { return valorPrimeraDerivada; }
+    public double getValorSegundaDerivada() { return valorSegundaDerivada; }
+    public boolean isFourierCumplido() { return fourierCumplido; }
+
     public Newton(double x0, double epsilon, String f) {
         super(x0, epsilon, f);
     }
@@ -11,6 +22,16 @@ public class Newton extends CondicionMetodoIndirectos {
     @Override
     public double resolver(int maxIteraciones) {
         double xs = getX0();
+        // Se evalúa Fourier antes de iniciar las iteraciones de Newton.
+        valorFInicial = evaluar(xs);
+        Argument xInicial = new Argument("x");
+        xInicial.setArgumentValue(xs);
+        valorPrimeraDerivada = new Expression("der(" + f + ",x)", xInicial).calculate();
+        valorSegundaDerivada = new Expression("der(der(" + f + ",x),x)", xInicial).calculate();
+        fourierCumplido = Double.isFinite(valorFInicial * valorSegundaDerivada)
+                && valorFInicial * valorSegundaDerivada > 0
+                && Double.isFinite(valorPrimeraDerivada) && Math.abs(valorPrimeraDerivada) > 1e-14;
+
         int iteracion = 0;
         double error = Double.MAX_VALUE;
         registrar(0, xs, Double.NaN);
@@ -61,6 +82,16 @@ public class Newton extends CondicionMetodoIndirectos{
 
     public double resolver(){
         double xs = getX0();
+        // Se evalúa Fourier antes de iniciar las iteraciones de Newton.
+        valorFInicial = evaluar(xs);
+        Argument xInicial = new Argument("x");
+        xInicial.setArgumentValue(xs);
+        valorPrimeraDerivada = new Expression("der(" + f + ",x)", xInicial).calculate();
+        valorSegundaDerivada = new Expression("der(der(" + f + ",x),x)", xInicial).calculate();
+        fourierCumplido = Double.isFinite(valorFInicial * valorSegundaDerivada)
+                && valorFInicial * valorSegundaDerivada > 0
+                && Double.isFinite(valorPrimeraDerivada) && Math.abs(valorPrimeraDerivada) > 1e-14;
+
         int iteracion = 0;
         double error = Double.MAX_VALUE;
 

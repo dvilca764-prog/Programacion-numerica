@@ -27,6 +27,7 @@ import org.mariuszgromada.math.mxparser.Argument;
 import org.mariuszgromada.math.mxparser.Expression;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -50,7 +51,13 @@ public class VentanaNumericaApp extends Application {
     private TableView<Fila> tabla;
     private LineChart<Number, Number> grafico;
     private HBox leyenda;
+    private Label lblPuntoGrafica;
     private Tab tabTabla;
+    private VBox panelDesarrollo;
+    private ComboBox<Metodo> cmbCompararA, cmbCompararB;
+    private VBox panelComparacion;
+    private TextField cmpA, cmpB, cmpX0, cmpX1, cmpG;
+    private Label valRaizExacta;
 
     // Vista interactiva: una unidad tiene el mismo tamaño en X e Y.
     private boolean vistaInicializada = false;
@@ -81,11 +88,11 @@ public class VentanaNumericaApp extends Application {
     }
 
     private static final List<Ejemplo> EJEMPLOS = List.of(
-            new Ejemplo("x² − 1.5  (raíz de 1.5)", "x^2 - 1.5", "(x + 1.5/x)/2", "1", "2", "1", "2"),
-            new Ejemplo("cos(x) − x", "cos(x) - x", "cos(x)", "0", "1", "0.5", "1"),
+            new Ejemplo("Polinomio Cúbico (Raíces Múltiples): (x-1)³", "(x-1)^3", "(x-1)^3 + x", "0", "2", "0.2", "0.5"),
+            new Ejemplo("Función Altamente Oscilatoria: eˣ - cos(x) - 1", "exp(x) - cos(x) - 1", "log(cos(x) + 1)", "0", "1.5", "0.5", "1.0"),
+            new Ejemplo("Pendiente extrema: arctan(x) - 0.1", "atan(x) - 0.1", "tan(0.1)", "0", "1", "0.1", "0.5"),
             new Ejemplo("x³ − x − 2", "x^3 - x - 2", "(x + 2)^(1/3)", "1", "2", "1.5", "2"),
-            new Ejemplo("eˣ − 3x", "exp(x) - 3*x", "exp(x)/3", "0", "1", "0", "1"),
-            new Ejemplo("x·sen(x) − 1", "x*sin(x) - 1", "1/sin(x)", "0.5", "2", "1", "1.5")
+            new Ejemplo("eˣ − 3x", "exp(x) - 3*x", "exp(x)/3", "0", "1", "0", "1")
     );
 
     // ================================================================== START
@@ -101,12 +108,13 @@ public class VentanaNumericaApp extends Application {
         Scene scene = new Scene(root, 1280, 780);
         scene.getStylesheets().add(cargarCss());
         stage.setScene(scene);
-        stage.setMinWidth(1000);
+        // Ancho mínimo suficiente para que la tabla entre completa, sin recortar columnas.
+        stage.setMinWidth(1180);
         stage.setMinHeight(650);
         stage.setMaximized(true);
         stage.show();
 
-        cargarEjemplo(EJEMPLOS.get(0));
+        // cargarEjemplo(EJEMPLOS.get(0)); sin valor preescrito
         actualizarVisibilidad();
         resolver();
     }
@@ -144,7 +152,7 @@ public class VentanaNumericaApp extends Application {
         cmbEjemplo.setOnAction(e -> { if (cmbEjemplo.getValue() != null) cargarEjemplo(cmbEjemplo.getValue()); });
 
         VBox cardFuncion = card("FUNCIÓN",
-                campoConEtiqueta("f(x)", txtFuncion), boxG,
+                campoConEtiqueta("f(x)", txtFuncion), crearTecladoFuncion(txtFuncion), boxG, crearTecladoFuncion(txtG),
                 campoConEtiqueta("Ejemplos", cmbEjemplo));
 
         // ---- Método (todos en una sola lista)
@@ -222,6 +230,37 @@ public class VentanaNumericaApp extends Application {
         return scroll;
     }
 
+    /** Teclado matemático: inserta en la posición del cursor sin bloquear el teclado físico. */
+    private Node crearTecladoFuncion(TextField destino) {
+        String[][] teclas = {{"sin(","cos(","tan(","asin(","acos(","atan("},
+                {"ln(","log(","exp(","sqrt(","abs(","pi"},
+                {"x","(",")","^","/","*","-","+"},
+                {"7","8","9","4","5","6","1","2","3","0",".",","}};
+        VBox teclado = new VBox(5);
+        for (String[] fila : teclas) {
+            HBox botones = new HBox(5);
+            for (String simbolo : fila) {
+                Button b = new Button(simbolo);
+                b.getStyleClass().add("tecla-matematica");
+                b.setMaxWidth(Double.MAX_VALUE); HBox.setHgrow(b, Priority.ALWAYS);
+                b.setOnAction(ev -> {
+                    int inicio = destino.getSelection().getStart(), fin = destino.getSelection().getEnd();
+                    String texto = destino.getText();
+                    destino.replaceText(inicio, fin, simbolo);
+                    destino.requestFocus(); destino.positionCaret(inicio + simbolo.length());
+                });
+                botones.getChildren().add(b);
+            }
+            teclado.getChildren().add(botones);
+        }
+        Button borrar = new Button("⌫ Borrar carácter");
+        borrar.setOnAction(ev -> { int p = destino.getCaretPosition(); if (p > 0) destino.deleteText(p-1,p); destino.requestFocus(); });
+        teclado.getChildren().add(borrar);
+        TitledPane plegable = new TitledPane("Teclado matemático", teclado);
+        plegable.setExpanded(false);
+        return plegable;
+    }
+
     private void actualizarVisibilidad() {
         Metodo m = cmbAlgoritmo.getValue();
         boolean cerrado = m == null || m.esCerrado();
@@ -253,6 +292,7 @@ public class VentanaNumericaApp extends Application {
         valIter = new Label("—");
         valError = new Label("—");
         HBox stats = new HBox(12,
+                stat("RAÍZ EXACTA (si se identifica)", valRaizExacta = new Label("—"), false),
                 stat("RAÍZ APROXIMADA", valRaiz, true),
                 stat("f(raíz)", valFRaiz, false),
                 stat("ITERACIONES", valIter, false),
@@ -269,12 +309,239 @@ public class VentanaNumericaApp extends Application {
         tabGrafica.setClosable(false);
         tabTabla = new Tab("📋  Tabla de iteraciones", crearPanelTabla());
         tabTabla.setClosable(false);
-        tabs.getTabs().addAll(tabGrafica, tabTabla);
+        Tab tabDesarrollo = new Tab("🧮  Desarrollo y criterios", crearPanelDesarrollo());
+        tabDesarrollo.setClosable(false);
+        Tab tabComparar = new Tab("⚖  Comparar métodos", crearPanelComparacion());
+        tabComparar.setClosable(false);
+        tabs.getTabs().addAll(tabGrafica, tabTabla, tabDesarrollo, tabComparar);
         VBox.setVgrow(tabs, Priority.ALWAYS);
 
         VBox v = new VBox(12, stats, lblEstado, tabs);
         v.setPadding(new Insets(16, 16, 16, 4));
+        // Reserva espacio real para las columnas de la tabla en el área de resultados.
+        v.setMinWidth(760);
         return v;
+    }
+
+    private VBox crearPanelComparacion() {
+        cmbCompararA = new ComboBox<>(FXCollections.observableArrayList(Metodo.values()));
+        cmbCompararB = new ComboBox<>(FXCollections.observableArrayList(Metodo.values()));
+        cmbCompararA.getSelectionModel().select(Metodo.BISECCION);
+        cmbCompararB.getSelectionModel().select(Metodo.NEWTON);
+        cmbCompararA.setMaxWidth(Double.MAX_VALUE);
+        cmbCompararB.setMaxWidth(Double.MAX_VALUE);
+        cmpA = campo("Extremo a"); cmpB = campo("Extremo b");
+        cmpX0 = campo("Punto inicial x₀"); cmpX1 = campo("Segundo punto x₁ (Secante)");
+        cmpG = campo("ej: cos(x) o (x + 2/x)/2");
+        cmpA.setText("0"); cmpB.setText("1.3"); cmpX0.setText("0.5"); cmpX1.setText("1");
+        VBox parametros = card("PARÁMETROS DE COMPARACIÓN (independientes de la pantalla principal)",
+                new HBox(10, campoConEtiqueta("Extremo a", cmpA), campoConEtiqueta("Extremo b", cmpB)),
+                new HBox(10, campoConEtiqueta("Punto inicial x₀", cmpX0), campoConEtiqueta("Punto x₁", cmpX1)),
+                campoConEtiqueta("g(x) · función de iteración (métodos que la requieren)", cmpG),
+                crearTecladoFuncion(cmpG));
+        Button btn = new Button("Comparar métodos seleccionados");
+        btn.getStyleClass().add("boton-primario");
+        btn.setOnAction(e -> compararMetodos());
+        cmbCompararA.setOnAction(e -> actualizarParametrosComparacion());
+        cmbCompararB.setOnAction(e -> actualizarParametrosComparacion());
+        panelComparacion = new VBox(12,
+                bloqueDesarrollo("Comparación de dos métodos", "Cada método utiliza sus propios parámetros. La comparación no depende del algoritmo seleccionado en la pantalla principal."),
+                campoConEtiqueta("Primer método", cmbCompararA),
+                campoConEtiqueta("Segundo método", cmbCompararB), parametros, btn);
+        panelComparacion.setPadding(new Insets(14));
+        actualizarParametrosComparacion();
+        ScrollPane scroll = new ScrollPane(panelComparacion);
+        scroll.setFitToWidth(true);
+        return new VBox(scroll);
+    }
+
+    private void actualizarParametrosComparacion() {
+        if (cmpA == null) return;
+        boolean cerrado = cmbCompararA.getValue().esCerrado() || cmbCompararB.getValue().esCerrado();
+        boolean abierto = !cmbCompararA.getValue().esCerrado() || !cmbCompararB.getValue().esCerrado();
+        boolean secante = cmbCompararA.getValue().usaX1() || cmbCompararB.getValue().usaX1();
+        cmpA.setDisable(!cerrado); cmpB.setDisable(!cerrado);
+        cmpX0.setDisable(!abierto); cmpX1.setDisable(!secante);
+        boolean usaG = cmbCompararA.getValue().usaG() || cmbCompararB.getValue().usaG();
+        cmpG.setDisable(!usaG);
+    }
+
+    private void compararMetodos() {
+        try {
+            Metodo a = cmbCompararA.getValue(), b = cmbCompararB.getValue();
+            if (a == null || b == null) throw new IllegalArgumentException("Seleccioná los dos métodos.");
+            if (a == b) throw new IllegalArgumentException("Elegí dos métodos distintos para compararlos.");
+            String fTexto = txtFuncion.getText().trim();
+            DoubleUnaryOperator f = funcion(fTexto, "f(x)");
+            double tol = numero(txtEpsilon, "la tolerancia");
+            if (tol <= 0) throw new IllegalArgumentException("La tolerancia debe ser mayor que 0.");
+            int max = (int) numero(txtMaxIter, "las iteraciones máximas");
+            if (max < 1 || max > 100000) throw new IllegalArgumentException("Las iteraciones máximas deben estar entre 1 y 100000.");
+            double aa = Double.NaN, bb = Double.NaN, x0 = Double.NaN, x1 = Double.NaN;
+            if (a.esCerrado() || b.esCerrado()) { aa = numero(cmpA, "el extremo a de la comparación"); bb = numero(cmpB, "el extremo b de la comparación"); }
+            if (!a.esCerrado() || !b.esCerrado()) x0 = numero(cmpX0, "el punto inicial x₀ de la comparación");
+            if (a.usaX1() || b.usaX1()) x1 = numero(cmpX1, "el punto x₁ de la comparación");
+            String gTexto = cmpG.getText().trim();
+            DoubleUnaryOperator g = (a.usaG() || b.usaG()) ? funcion(gTexto, "g(x) de la comparación") : null;
+            Resultado ra = ejecutarComparacion(a, fTexto, f, gTexto, g, aa, bb, x0, x1, tol, max);
+            Resultado rb = ejecutarComparacion(b, fTexto, f, gTexto, g, aa, bb, x0, x1, tol, max);
+            panelComparacion.getChildren().removeIf(n -> "resultado-comparacion".equals(n.getUserData()));
+            VBox resultado = new VBox(10);
+            resultado.setUserData("resultado-comparacion");
+            resultado.getChildren().add(bloqueDesarrollo("Resultado de la comparación",
+                    "Función utilizada: f(x) = " + fTexto,
+                    "Tolerancia: " + num(tol) + " · Máximo de iteraciones: " + max));
+            resultado.getChildren().add(bloqueDesarrollo("Método 1: " + a,
+                    "Raíz racional identificada: " + ResolverRaizExacta.buscar(fTexto, ra.raiz),
+                    "Raíz aproximada: " + num(ra.raiz), "f(raíz): " + (Double.isFinite(ra.raiz) ? num(f.applyAsDouble(ra.raiz)) : "no definido"),
+                    "Iteraciones: " + ra.iteraciones(), "Error final: " + cient(ra.errorFinal()),
+                    ra.convergio ? "Estado: convergió." : "Estado: no alcanzó la tolerancia."));
+            resultado.getChildren().add(bloqueDesarrollo("Método 2: " + b,
+                    "Raíz racional identificada: " + ResolverRaizExacta.buscar(fTexto, rb.raiz),
+                    "Raíz aproximada: " + num(rb.raiz), "f(raíz): " + (Double.isFinite(rb.raiz) ? num(f.applyAsDouble(rb.raiz)) : "no definido"),
+                    "Iteraciones: " + rb.iteraciones(), "Error final: " + cient(rb.errorFinal()),
+                    rb.convergio ? "Estado: convergió." : "Estado: no alcanzó la tolerancia."));
+            String ganador = ra.convergio && rb.convergio ? (ra.iteraciones() < rb.iteraciones() ? a + " necesitó menos iteraciones." : rb.iteraciones() < ra.iteraciones() ? b + " necesitó menos iteraciones." : "Ambos necesitaron la misma cantidad de iteraciones.") :
+                    ra.convergio ? a + " convergió y " + b + " no alcanzó la tolerancia." : rb.convergio ? b + " convergió y " + a + " no alcanzó la tolerancia." : "Ninguno alcanzó la tolerancia indicada.";
+            resultado.getChildren().add(bloqueDesarrollo("Conclusión", ganador));
+            panelComparacion.getChildren().add(resultado);
+        } catch (IllegalArgumentException ex) {
+            panelComparacion.getChildren().removeIf(n -> "resultado-comparacion".equals(n.getUserData()));
+            panelComparacion.getChildren().add(bloqueDesarrollo("No se pudo comparar", ex.getMessage()));
+        }
+    }
+
+    private Resultado ejecutarComparacion(Metodo m, String fTexto, DoubleUnaryOperator f,
+                                          String gTexto, DoubleUnaryOperator g, double a, double b,
+                                          double x0, double x1, double tol, int max) {
+        if (m.esCerrado()) return MotorNumerico.cerrado(m, fTexto, f, a, b, tol, max);
+        return MotorNumerico.abierto(m, fTexto, gTexto, f, m.usaG() ? g : null, x0, m.usaX1() ? x1 : Double.NaN, tol, max);
+    }
+
+    private VBox crearPanelDesarrollo() {
+        panelDesarrollo = new VBox(12);
+        panelDesarrollo.setPadding(new Insets(12));
+        panelDesarrollo.getStyleClass().add("desarrollo-panel");
+        Label vacio = new Label("Al resolver, acá se mostrarán los criterios, las derivadas y el desarrollo del método paso a paso.");
+        vacio.setWrapText(true);
+        vacio.getStyleClass().add("subtitulo");
+        panelDesarrollo.getChildren().add(vacio);
+        ScrollPane scroll = new ScrollPane(panelDesarrollo);
+        scroll.setFitToWidth(true);
+        scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        scroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        return new VBox(scroll);
+    }
+
+    private VBox bloqueDesarrollo(String titulo, String... lineas) {
+        Label encabezado = new Label(titulo);
+        encabezado.getStyleClass().add("desarrollo-titulo");
+        VBox bloque = new VBox(7);
+        bloque.getStyleClass().add("desarrollo-bloque");
+        bloque.getChildren().add(encabezado);
+        for (String linea : lineas) {
+            Label l = new Label(linea);
+            l.setWrapText(true);
+            l.setMaxWidth(Double.MAX_VALUE);
+            l.getStyleClass().add("desarrollo-linea");
+            bloque.getChildren().add(l);
+        }
+        return bloque;
+    }
+
+    private double evaluarExpresion(String expresion, double x) {
+        Argument arg = new Argument("x", x);
+        return new Expression(expresion, arg).calculate();
+    }
+
+    private void mostrarDesarrollo(Metodo m, Resultado r, String textoF, String textoG,
+                                   double x0, double x1, double tol, int maxIter) {
+        panelDesarrollo.getChildren().clear();
+        panelDesarrollo.getChildren().add(bloqueDesarrollo("1. Datos del problema",
+                "Función: f(x) = " + textoF,
+                m.usaG() ? "Función de iteración: g(x) = " + textoG : "Método: " + m,
+                "Tolerancia: ε = " + num(tol),
+                "Punto inicial: x₀ = " + num(x0),
+                m.usaX1() ? "Segundo punto: x₁ = " + num(x1) : "Iteraciones registradas: " + r.filas.size()));
+        panelDesarrollo.getChildren().add(bloqueDesarrollo("2. Criterio de corte utilizado",
+                "Método ejecutado: " + m,
+                "Tolerancia configurada: ε = " + num(tol),
+                "Límite de seguridad: " + maxIter + " iteraciones.",
+                descripcionCorte(m),
+                "El algoritmo se detiene cuando se cumple el criterio indicado o cuando llega al máximo de iteraciones."));
+        if (m.esCerrado()) {
+            panelDesarrollo.getChildren().add(bloqueDesarrollo("3. Criterio del método cerrado",
+                    "Se trabaja con el intervalo [a, b] y se comprueba el cambio de signo de f en sus extremos.",
+                    "En cada iteración se actualiza el intervalo hasta alcanzar la tolerancia o el máximo permitido.",
+                    "Criterio de parada: el error indicado por el método debe ser menor que ε."));
+            panelDesarrollo.getChildren().add(bloqueDesarrollo("4. Resultado y conclusión",
+                    "Aproximación obtenida: x ≈ " + num(r.raiz),
+                    "f(x) = " + (Double.isFinite(r.raiz) ? num(ultimaF.applyAsDouble(r.raiz)) : "no definido"),
+                    "Iteraciones realizadas: " + r.iteraciones(),
+                    "Error final: " + num(r.errorFinal()),
+                    r.convergio ? "Conclusión: el método convergió según la tolerancia indicada." :
+                            "Conclusión: no se alcanzó la tolerancia indicada."));
+            return;
+        } else if (m == Metodo.NEWTON) {
+            double fx = evaluarExpresion(textoF, x0);
+            double d1 = evaluarExpresion("der(" + textoF + ",x)", x0);
+            double d2 = evaluarExpresion("der(der(" + textoF + ",x),x)", x0);
+            boolean fourier = Double.isFinite(fx*d2) && fx*d2 > 0 && Math.abs(d1) > 1e-14;
+            panelDesarrollo.getChildren().add(bloqueDesarrollo("3. Derivadas de la función",
+                    "Función original: f(x) = " + textoF,
+                    "Primera derivada: f'(x) = " + r.derivadaPrimera,
+                    "Segunda derivada: f''(x) = " + r.derivadaSegunda,
+                    "Evaluación inicial: f(x₀) = " + num(fx),
+                    "Evaluación de la primera derivada: f'(x₀) = " + num(d1),
+                    "Evaluación de la segunda derivada: f''(x₀) = " + num(d2)));
+            panelDesarrollo.getChildren().add(bloqueDesarrollo("4. Aplicación del criterio de Fourier para Newton",
+                    "Se comprueba en el punto inicial que f(x₀) · f''(x₀) = " + num(fx*d2),
+                    "Además, f'(x₀) = " + num(d1) + (Math.abs(d1) > 1e-14 ? " (distinta de cero)." : " (es cero o muy cercana a cero)."),
+                    fourier ? "Resultado: se cumple la comprobación local de signo para elegir x₀ en Newton." :
+                            "Resultado: NO se cumple la comprobación local de Fourier en x₀; conviene elegir otro punto inicial.",
+                    "Importante: la verificación completa del criterio de Fourier requiere estudiar el signo de f'' en todo el intervalo considerado."));
+            panelDesarrollo.getChildren().add(bloqueDesarrollo("5. Fórmula de Newton-Raphson",
+                    "xₙ₊₁ = xₙ − f(xₙ) / f'(xₙ)",
+                    "En cada paso se evalúa f(xₙ), se divide por f'(xₙ) y se obtiene el siguiente x.",
+                    "Error utilizado: |xₙ₊₁ − xₙ|."));
+        } else if (m == Metodo.PUNTO_FIJO) {
+            String dg = DerivadorSimbolico.derivarPrimera(textoG);
+            double d = evaluarExpresion("der(" + textoG + ",x)", x0);
+            panelDesarrollo.getChildren().add(bloqueDesarrollo("3. Derivada de la función de iteración",
+                    "g(x) = " + textoG,
+                    "Derivada calculada: g'(x) = " + dg,
+                    "Evaluación en el punto inicial: g'(x₀) = " + num(d)));
+            panelDesarrollo.getChildren().add(bloqueDesarrollo("4. Criterio de convergencia de Punto Fijo",
+                    "g(x) = " + textoG,
+                    "g'(x) = " + dg,
+                    "g'(x₀) = " + num(d),
+                    "|g'(x₀)| = " + num(Math.abs(d)),
+                    Math.abs(d) < 1 ? "Conclusión: |g'(x₀)| < 1. Hay indicio local de convergencia." :
+                            "Conclusión: |g'(x₀)| ≥ 1. No se garantiza la convergencia; puede divergir.",
+                    "La condición rigurosa se verifica en un entorno/intervalo, no solamente en x₀."));
+            panelDesarrollo.getChildren().add(bloqueDesarrollo("5. Fórmula de iteración",
+                    "xₙ₊₁ = g(xₙ)",
+                    "Error utilizado: |xₙ₊₁ − xₙ|.",
+                    "Se repite la sustitución hasta que el error sea menor que ε o se alcance el máximo de iteraciones."));
+        } else {
+            panelDesarrollo.getChildren().add(bloqueDesarrollo("3. Expresiones de las derivadas",
+                    "f'(x) = " + r.derivadaPrimera,
+                    "f''(x) = " + r.derivadaSegunda));
+            String formula = m == Metodo.SECANTE ? "xₙ₊₁ = xₙ − f(xₙ)(xₙ − xₙ₋₁) / (f(xₙ) − f(xₙ₋₁))" :
+                    m == Metodo.HALLEY ? "xₙ₊₁ = xₙ − 2f(xₙ)f'(xₙ) / (2[f'(xₙ)]² − f(xₙ)f''(xₙ))" :
+                            m == Metodo.NEWTON_EXT ? "Método de Newton extendido: actualización basada en derivadas para raíces múltiples." :
+                                    m == Metodo.AITKEN ? "Aceleración Δ² aplicada a la sucesión xₙ₊₁ = g(xₙ)." :
+                                            m == Metodo.STEFFENSEN ? "Aceleración de Steffensen aplicada a la iteración de punto fijo." :
+                                                    "Se actualiza la aproximación mediante la regla propia del método seleccionado.";
+            panelDesarrollo.getChildren().add(bloqueDesarrollo("4. Fórmula / procedimiento", formula));
+        }
+        panelDesarrollo.getChildren().add(bloqueDesarrollo("5. Resultado y conclusión",
+                "Aproximación obtenida: x ≈ " + num(r.raiz),
+                "f(x) = " + (Double.isFinite(r.raiz) ? num(ultimaF.applyAsDouble(r.raiz)) : "no definido"),
+                "Iteraciones realizadas: " + r.iteraciones(),
+                "Error final: " + num(r.errorFinal()),
+                r.convergio ? "Conclusión: el método convergió según la tolerancia indicada." :
+                        "Conclusión: no se alcanzó la tolerancia indicada. Revisá los datos iniciales o el criterio."));
     }
 
     private VBox stat(String titulo, Label valor, boolean destacado) {
@@ -301,7 +568,11 @@ public class VentanaNumericaApp extends Application {
         leyenda.setAlignment(Pos.CENTER_RIGHT);
         Region espacio = new Region();
         HBox.setHgrow(espacio, Priority.ALWAYS);
-        HBox barra = new HBox(16, chkVerF, chkVerG, chkVerIter, espacio, leyenda);
+        lblPuntoGrafica = new Label("Seleccioná un punto de la gráfica para ver sus coordenadas.");
+        lblPuntoGrafica.getStyleClass().add("subtitulo");
+        lblPuntoGrafica.setWrapText(true);
+        lblPuntoGrafica.setMaxWidth(Double.MAX_VALUE);
+        HBox barra = new HBox(12, chkVerF, chkVerG, chkVerIter, espacio, leyenda);
         barra.setAlignment(Pos.CENTER_LEFT);
         barra.setPadding(new Insets(4, 4, 0, 4));
 
@@ -311,6 +582,12 @@ public class VentanaNumericaApp extends Application {
         yAxis.setLabel("y");
         xAxis.setAutoRanging(false);
         yAxis.setAutoRanging(false);
+        javafx.util.StringConverter<Number> formatoEje = new javafx.util.StringConverter<Number>() {
+            @Override public String toString(Number valor) { return valor == null ? "" : num(valor.doubleValue()); }
+            @Override public Number fromString(String texto) { return Double.parseDouble(texto.replace(',', '.')); }
+        };
+        xAxis.setTickLabelFormatter(formatoEje);
+        yAxis.setTickLabelFormatter(formatoEje);
         xAxis.setMinorTickVisible(false);
         yAxis.setMinorTickVisible(false);
 
@@ -322,7 +599,7 @@ public class VentanaNumericaApp extends Application {
         VBox.setVgrow(grafico, Priority.ALWAYS);
         instalarNavegacionGrafico();
 
-        VBox v = new VBox(6, barra, grafico);
+        VBox v = new VBox(6, barra, lblPuntoGrafica, grafico);
         v.getStyleClass().add("panel-grafica");
         v.setPadding(new Insets(10));
         return v;
@@ -331,8 +608,12 @@ public class VentanaNumericaApp extends Application {
     // ------------------------------------------------------------------ tabla
     private Node crearPanelTabla() {
         tabla = new TableView<>();
+        // Las columnas se reparten proporcionalmente según el ancho real disponible.
+        // No se usa una tabla con ancho fijo ni se recortan los valores de las celdas.
         tabla.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
-        tabla.setFixedCellSize(32);
+        tabla.setFixedCellSize(36);
+        tabla.setSortPolicy(tv -> false);
+        tabla.widthProperty().addListener((obs, anterior, nuevo) -> ajustarAnchosColumnas());
         tabla.setPlaceholder(new Label("Todavía no hay iteraciones. Resolvé una ecuación primero."));
 
         Button btnCopiar = new Button("Copiar tabla");
@@ -359,13 +640,56 @@ public class VentanaNumericaApp extends Application {
             tabla.getColumns().add(columna("a", f -> num(f.a), null));
             tabla.getColumns().add(columna("b", f -> num(f.b), null));
             tabla.getColumns().add(columna("c", f -> num(f.x), null));
-            tabla.getColumns().add(columna("f(c)", f -> cient(f.fx), null));
+            tabla.getColumns().add(columna("f(c)", f -> num(f.fx), null));
         } else {
             tabla.getColumns().add(columna("xₙ", f -> num(f.x), null));
-            tabla.getColumns().add(columna("f(xₙ)", f -> cient(f.fx), null));
+            tabla.getColumns().add(columna("f(xₙ)", f -> num(f.fx), null));
             if (m.usaG()) tabla.getColumns().add(columna("g(xₙ)", f -> num(f.gx), null));
         }
-        tabla.getColumns().add(columna("Error", f -> cient(f.error), null));
+        tabla.getColumns().add(columna("Error", f -> num(f.error), null));
+        ajustarAnchosColumnas();
+    }
+
+    /**
+     * Distribuye el ancho de la tabla entre todas sus columnas. Los anchos mínimos
+     * alcanzan para mostrar completos los números con el formato usado (8 decimales
+     * o notación científica), mientras que el espacio sobrante se reparte según
+     * la importancia de cada dato. Así se evita que una columna quede comprimida.
+     */
+    private void ajustarAnchosColumnas() {
+        if (tabla == null || tabla.getColumns().isEmpty()) return;
+        int cantidad = tabla.getColumns().size();
+        double ancho = Math.max(0, tabla.getWidth() - 30); // bordes y barra vertical
+        if (ancho <= 0) return;
+
+        double[] pesos;
+        if (cantidad == 6) {          // Bisección y Regula Falsi
+            pesos = new double[]{0.08, 0.17, 0.17, 0.17, 0.20, 0.21};
+        } else if (cantidad == 5) {   // métodos abiertos que también muestran g(xₙ)
+            pesos = new double[]{0.08, 0.21, 0.21, 0.21, 0.29};
+        } else {                      // métodos abiertos sin g(xₙ)
+            pesos = new double[]{0.09, 0.27, 0.27, 0.37};
+        }
+
+        double minimoTotal = 0;
+        for (int i = 0; i < cantidad; i++) {
+            double minimo = i == 0 ? 64 : 132;
+            tabla.getColumns().get(i).setMinWidth(minimo);
+            minimoTotal += minimo;
+        }
+        // El ancho mínimo de la ventana garantiza que normalmente se disponga
+        // de espacio suficiente. Si el sistema resta algunos píxeles, se reparte
+        // igualmente el ancho disponible sin ocultar ni eliminar columnas.
+        double base = Math.max(ancho, minimoTotal);
+        double sobrante = Math.max(0, base - minimoTotal);
+        double sumaPesos = 0;
+        for (double peso : pesos) sumaPesos += peso;
+        for (int i = 0; i < cantidad; i++) {
+            double minimo = i == 0 ? 64 : 132;
+            double pref = minimo + sobrante * (pesos[i] / sumaPesos);
+            tabla.getColumns().get(i).setPrefWidth(pref);
+            tabla.getColumns().get(i).setMaxWidth(Double.MAX_VALUE);
+        }
     }
 
     private TableColumn<Fila, String> columna(String titulo, Function<Fila, String> fn, String estilo) {
@@ -429,6 +753,7 @@ public class VentanaNumericaApp extends Application {
             ultimoA = a; ultimoB = b; ultimoX0 = x0; ultimoX1 = x1;
 
             mostrarResultado(m, r);
+            if (lblPuntoGrafica != null) lblPuntoGrafica.setText("Seleccioná un punto de la gráfica para ver sus coordenadas.");
             vistaInicializada = false; // Nuevo problema: centrar de nuevo la vista.
             dibujar();
 
@@ -441,20 +766,30 @@ public class VentanaNumericaApp extends Application {
     private void mostrarResultado(Metodo m, Resultado r) {
         configurarColumnas(m);
         tabla.setItems(FXCollections.observableArrayList(r.filas));
+        // Mostrar también el criterio y las derivadas cuando el método falla al iterar.
+        mostrarDesarrollo(m, r, ultimoTextoF, txtG.getText().trim(), ultimoX0, ultimoX1,
+                numero(txtEpsilon, "la tolerancia"), (int) numero(txtMaxIter, "las iteraciones máximas"));
 
         if (r.fallo) {
             valRaiz.setText(Double.isNaN(r.raiz) ? "—" : num(r.raiz));
+            valRaizExacta.setText("No identificada");
             valFRaiz.setText("—");
             valIter.setText(r.filas.isEmpty() ? "—" : String.valueOf(r.iteraciones()));
             valError.setText("—");
             setEstado("err", "✖  " + r.mensaje);
             setBadge("Sin solución", "err");
+            panelDesarrollo.getChildren().clear();
+            panelDesarrollo.getChildren().add(bloqueDesarrollo("Resultado del método",
+                    r.mensaje,
+                    "Iteraciones registradas: " + r.filas.size(),
+                    "Revisá las expresiones y los valores iniciales."));
             return;
         }
         valRaiz.setText(num(r.raiz));
+        valRaizExacta.setText(ResolverRaizExacta.buscar(ultimoTextoF, r.raiz));
         valFRaiz.setText(cient(ultimaF.applyAsDouble(r.raiz)));
         valIter.setText(String.valueOf(r.iteraciones()));
-        valError.setText(cient(r.errorFinal()));
+        valError.setText(num(r.errorFinal()));
         if (r.convergio) {
             setEstado("ok", "✔  " + r.mensaje + "  ·  " + m);
             setBadge("Convergió", "ok");
@@ -489,6 +824,20 @@ public class VentanaNumericaApp extends Application {
         if (lo > hi) { lo = -5; hi = 5; }
         double pad = Math.max(0.5, 0.25 * (hi - lo));
         return new double[]{lo - pad, hi + pad};
+    }
+
+    private void instalarInfoPunto(XYChart.Data<Number, Number> dato, String titulo, String... lineas) {
+        final String detalle = titulo + "\n" + String.join("\n", lineas);
+        dato.nodeProperty().addListener((obs, anterior, nodo) -> {
+            if (nodo == null) return;
+            Tooltip.install(nodo, new Tooltip(detalle));
+            nodo.setOnMouseClicked(evento -> {
+                if (evento.getButton() == MouseButton.PRIMARY && lblPuntoGrafica != null) {
+                    lblPuntoGrafica.setText(detalle.replace("\n", "     |     "));
+                    evento.consume();
+                }
+            });
+        });
     }
 
     private void dibujar() {
@@ -602,16 +951,24 @@ public class VentanaNumericaApp extends Application {
                 double y = fp ? f.gx : f.fx;
                 if (!ok(f.x) || !ok(y)) continue;
                 XYChart.Data<Number, Number> d = new XYChart.Data<>(f.x, y);
-                final String tip = (ultimoMetodo.esCerrado() ? "c" : "x") + "₍" + f.n + "₎ = " + num(f.x)
-                        + "\n" + (fp ? "g" : "f") + " = " + num(y);
-                d.nodeProperty().addListener((o, viejo, nodo) -> { if (nodo != null) Tooltip.install(nodo, new Tooltip(tip)); });
+                final String nombreX = (ultimoMetodo.esCerrado() ? "c" : "x") + "₍" + f.n + "₎";
+                final String nombreY = fp ? "g(xₙ)" : "f(xₙ)";
+                if (fp) {
+                    instalarInfoPunto(d, "Iteración " + f.n,
+                            nombreX + " = " + num(f.x),
+                            "f(xₙ) = " + num(f.fx),
+                            nombreY + " = " + num(y));
+                } else {
+                    instalarInfoPunto(d, "Iteración " + f.n,
+                            nombreX + " = " + num(f.x),
+                            nombreY + " = " + num(y));
+                }
                 sIt.getData().add(d);
             }
         }
         if (r != null && !r.fallo && ok(r.raiz)) {
             XYChart.Data<Number, Number> d = new XYChart.Data<>(r.raiz, 0);
-            final String tip = "Raíz ≈ " + num(r.raiz);
-            d.nodeProperty().addListener((o, viejo, nodo) -> { if (nodo != null) Tooltip.install(nodo, new Tooltip(tip)); });
+            instalarInfoPunto(d, "Raíz aproximada", "x = " + num(r.raiz), "f(x) = " + num(ultimaF.applyAsDouble(r.raiz)));
             sRaiz.getData().add(d);
         }
 
@@ -667,10 +1024,19 @@ public class VentanaNumericaApp extends Application {
                 && p.getY() >= 0 && p.getY() <= z.getHeight();
     }
 
+    private boolean esSimboloGrafico(Object objetivo) {
+        Node nodo = objetivo instanceof Node ? (Node) objetivo : null;
+        while (nodo != null && nodo != grafico) {
+            if (nodo.getStyleClass().contains("chart-line-symbol")) return true;
+            nodo = nodo.getParent();
+        }
+        return false;
+    }
+
     private void instalarNavegacionGrafico() {
         grafico.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_PRESSED, e -> {
             if (e.getButton() != MouseButton.PRIMARY || !vistaInicializada
-                    || !dentroZona(e.getSceneX(), e.getSceneY())) return;
+                    || !dentroZona(e.getSceneX(), e.getSceneY()) || esSimboloGrafico(e.getTarget())) return;
             arrastrando = true;
             arrastreX = e.getSceneX();
             arrastreY = e.getSceneY();
@@ -760,17 +1126,42 @@ public class VentanaNumericaApp extends Application {
     private static boolean ok(double v) { return !Double.isNaN(v) && !Double.isInfinite(v); }
     private static double clamp(double v, double lo, double hi) { return Math.max(lo, Math.min(hi, v)); }
 
+    /** Representa cualquier double en decimal completo, sin notación científica (E-...). */
     private static String num(double v) {
-        if (Double.isNaN(v)) return "—";
-        if (Double.isInfinite(v)) return v > 0 ? "∞" : "-∞";
-        return String.format(Locale.US, "%.8f", v);
+        if (Double.isNaN(v)) return "No definido";
+        if (Double.isInfinite(v)) return v > 0 ? "Infinito" : "Menos infinito";
+        if (v == 0.0) return "0";
+        return new BigDecimal(Double.toString(v)).stripTrailingZeros().toPlainString();
     }
 
-    private static String cient(double v) {
-        if (Double.isNaN(v)) return "—";
-        if (Double.isInfinite(v)) return v > 0 ? "∞" : "-∞";
-        if (v == 0) return "0";
-        return String.format(Locale.US, "%.3e", v);
+    /** Se conserva como alias para llamadas antiguas: nunca muestra E ni exponentes. */
+    private static String cient(double v) { return num(v); }
+
+    private String descripcionCorte(Metodo m) {
+        switch (m) {
+            case BISECCION:
+                return "Corte efectivo: |f(cₙ)| ≤ ε. La columna Error muestra además la cota (bₙ − aₙ) / 2; el bucle de esta implementación se detiene por el valor absoluto de f(cₙ).";
+            case REGULA_FALSI:
+                return "Corte efectivo: |f(cₙ)| ≤ ε. En la columna Error se registra |cₙ − cₙ₋₁| desde la segunda fila; la primera no tiene error anterior.";
+            case REGULA_FALSI_MOD:
+                return "Corte efectivo: |f(cₙ)| ≤ ε. En la columna Error se registra |cₙ − cₙ₋₁| desde la segunda fila; la primera no tiene error anterior.";
+            case NEWTON:
+                return "Corte efectivo: |xₙ₊₁ − xₙ| ≤ ε. También se detiene si la derivada es prácticamente nula o si alcanza el máximo de iteraciones.";
+            case NEWTON_EXT:
+                return "Corte efectivo: |xₙ₊₁ − xₙ| ≤ ε. También se detiene ante un denominador prácticamente nulo o al alcanzar el máximo de iteraciones.";
+            case HALLEY:
+                return "Corte efectivo: |xₙ₊₁ − xₙ| ≤ ε. También se detiene ante un denominador prácticamente nulo o al alcanzar el máximo de iteraciones.";
+            case SECANTE:
+                return "Corte efectivo: |xₙ₊₁ − xₙ| ≤ ε. Usa los dos puntos iniciales y se detiene también si la diferencia entre sus evaluaciones es prácticamente nula.";
+            case PUNTO_FIJO:
+                return "Corte efectivo: |g(xₙ) − xₙ| ≤ ε, que se registra como |xₙ₊₁ − xₙ|. También se detiene al alcanzar el máximo de iteraciones.";
+            case AITKEN:
+                return "Corte efectivo: |xₙ₊₁ − xₙ| ≤ ε, donde xₙ₊₁ es la aproximación acelerada de Aitken. También se detiene si el denominador es prácticamente nulo.";
+            case STEFFENSEN:
+                return "Corte efectivo: |xₙ₊₁ − xₙ| ≤ ε, donde xₙ₊₁ es la aproximación acelerada de Steffensen. También se detiene si el denominador es prácticamente nulo.";
+            default:
+                return "Corte efectivo: error menor o igual que la tolerancia ε, o máximo de iteraciones alcanzado.";
+        }
     }
 
     private double numero(TextField t, String que) {
@@ -901,6 +1292,8 @@ public class VentanaNumericaApp extends Application {
             -fx-padding: 8 11 8 11; -fx-highlight-fill: #4F87B4;
         }
         .text-field:focused { -fx-border-color: #80C1DF; }
+        .tecla-matematica { -fx-background-color: #354D60; -fx-text-fill: #E5F1F8; -fx-background-radius: 7; -fx-padding: 6 8; }
+        .tecla-matematica:hover { -fx-background-color: #47718A; }
 
         .combo-box {
             -fx-background-color: #1B2632; -fx-background-radius: 9;
@@ -977,10 +1370,10 @@ public class VentanaNumericaApp extends Application {
             -fx-background-color: #354D61; -fx-size: 38; -fx-border-color: transparent;
         }
         .table-view .column-header .label { -fx-text-fill: #E2ECF3; -fx-font-weight: bold; -fx-alignment: CENTER; }
-        .table-row-cell { -fx-background-color: -fx-control-inner-background; -fx-cell-size: 32; -fx-border-color: transparent; }
+        .table-row-cell { -fx-background-color: -fx-control-inner-background; -fx-cell-size: 36; -fx-border-color: transparent; }
         .table-row-cell:odd { -fx-background-color: -fx-control-inner-background-alt; }
         .table-row-cell:selected { -fx-background-color: #42627C; }
-        .table-cell { -fx-text-fill: #E2ECF3; -fx-alignment: CENTER-RIGHT; -fx-font-family: "Consolas", "JetBrains Mono", monospace; -fx-padding: 0 14 0 8; }
+        .table-cell { -fx-text-fill: #E2ECF3; -fx-alignment: CENTER-RIGHT; -fx-font-family: "Consolas", "JetBrains Mono", monospace; -fx-font-size: 12px; -fx-padding: 0 10 0 8; }
         .table-cell.centro { -fx-alignment: CENTER; -fx-text-fill: #80C1DF; -fx-font-weight: bold; }
         .table-view .placeholder .label { -fx-text-fill: #91A6B6; }
 
@@ -1017,6 +1410,20 @@ public class VentanaNumericaApp extends Application {
             -fx-effect: dropshadow(gaussian, rgba(116,200,180,0.50), 12, 0.3, 0, 0);
         }
         .tooltip { -fx-background-color: #354D61; -fx-text-fill: white; -fx-font-family: "Consolas", monospace; -fx-background-radius: 8; }
+        .desarrollo-panel { -fx-background-color: transparent; }
+        .desarrollo-bloque {
+            -fx-background-color: #273746; -fx-background-radius: 12;
+            -fx-border-color: #3A5263; -fx-border-radius: 12; -fx-padding: 14;
+        }
+        .desarrollo-titulo { -fx-text-fill: #80C1DF; -fx-font-size: 14px; -fx-font-weight: bold; }
+        .desarrollo-linea { -fx-text-fill: #E0E9EF; -fx-font-size: 13px; -fx-padding: 2 0 2 4; }
+        .table-view { -fx-background-color: #1B2632; -fx-border-color: #3A5263; }
+        .table-view .column-header-background { -fx-background-color: #354D61; }
+        .table-view .column-header, .table-view .filler { -fx-background-color: #354D61; -fx-size: 38px; }
+        .table-view .column-header .label { -fx-text-fill: #F0F5F8; -fx-font-weight: bold; }
+        .table-row-cell { -fx-background-color: #22313F; -fx-border-color: #344858; -fx-table-cell-border-color: #344858; }
+        .table-row-cell:odd { -fx-background-color: #273746; }
+        .table-cell { -fx-text-fill: #E0E9EF; -fx-alignment: CENTER; -fx-padding: 7 10 7 10; }
         """;
 
     // ================================================================== MAIN

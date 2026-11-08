@@ -4,23 +4,23 @@ import aplicacion.MotorNumerico.Fila;
 import aplicacion.MotorNumerico.Metodo;
 import aplicacion.MotorNumerico.Resultado;
 import javafx.application.Application;
-import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
-import javafx.geometry.Point2D;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.Region;
 import javafx.scene.Scene;
-import javafx.scene.chart.LineChart;
-import javafx.scene.chart.NumberAxis;
-import javafx.scene.chart.XYChart;
+import javafx.scene.canvas.Canvas;
+import javafx.scene.canvas.GraphicsContext;
+import javafx.scene.paint.Color;
+import javafx.scene.text.Font;
+import javafx.scene.text.TextAlignment;
+import javafx.scene.input.KeyCode;
 import javafx.scene.control.*;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
-import javafx.scene.input.KeyCode;
 import javafx.scene.layout.*;
 import javafx.stage.Stage;
 import org.mariuszgromada.math.mxparser.Argument;
@@ -32,7 +32,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.DoubleUnaryOperator;
@@ -49,7 +48,12 @@ public class VentanaNumericaApp extends Application {
     private Label lblEstado, lblBadge;
     private Label valRaiz, valFRaiz, valIter, valError;
     private TableView<Fila> tabla;
-    private LineChart<Number, Number> grafico;
+    // Graficador cartesiano propio: escala geométrica idéntica en ambos ejes.
+    private Canvas lienzoGrafica, lienzoCursor;
+    private StackPane contenedorGrafica;
+    private Label lblFormulaGrafica, lblCoordenadasGrafica;
+    private boolean cursorEnGrafica = false;
+    private double cursorPx, cursorPy;
     private HBox leyenda;
     private Label lblPuntoGrafica;
     private Tab tabTabla;
@@ -57,6 +61,8 @@ public class VentanaNumericaApp extends Application {
     private ComboBox<Metodo> cmbCompararA, cmbCompararB;
     private VBox panelComparacion;
     private TextField cmpA, cmpB, cmpX0, cmpX1, cmpG;
+    // Campo que recibirá las teclas del teclado matemático compartido.
+    private TextField campoActivoTeclado;
     private Label valRaizExacta;
 
     // Vista interactiva: una unidad tiene el mismo tamaño en X e Y.
@@ -64,8 +70,6 @@ public class VentanaNumericaApp extends Application {
     private double centroX, centroY, unidadesPorPixel;
     private double arrastreX, arrastreY;
     private boolean arrastrando = false;
-    private Region zonaTrazado;
-    private double ultimoAnchoTrazado = -1, ultimoAltoTrazado = -1;
 
 
     // ---------------------------------------------- estado de la última corrida
@@ -76,7 +80,7 @@ public class VentanaNumericaApp extends Application {
     private String ultimoTextoF = "";
 
     private static final String[] COLOR = {
-            "#80C1DF", "#EDBA7A", "#AFC3D2", "#688394", "#DDA1BC", "#B6A2E2", "#74C8B4"};
+            "#53BDEB", "#00A884", "#8696A0", "#7AE3C3", "#F0B86E", "#D8A6FF", "#25D366"};
 
     // ---------------------------------------------------------------- ejemplos
     private static final class Ejemplo {
@@ -102,8 +106,12 @@ public class VentanaNumericaApp extends Application {
 
         BorderPane root = new BorderPane();
         root.setTop(crearCabecera());
-        root.setLeft(crearPanelIzquierdo());
+        Node panelIzquierdo = crearPanelIzquierdo();
+        root.setLeft(panelIzquierdo);
         root.setCenter(crearPanelDerecho());
+        // Espacio externo: evita que el panel quede pegado al borde de la ventana.
+        root.setPadding(new Insets(0, 10, 10, 10));
+        BorderPane.setMargin(panelIzquierdo, new Insets(10, 6, 0, 4));
 
         Scene scene = new Scene(root, 1280, 780);
         scene.getStylesheets().add(cargarCss());
@@ -151,9 +159,12 @@ public class VentanaNumericaApp extends Application {
         cmbEjemplo.setMaxWidth(Double.MAX_VALUE);
         cmbEjemplo.setOnAction(e -> { if (cmbEjemplo.getValue() != null) cargarEjemplo(cmbEjemplo.getValue()); });
 
+        registrarCampoTeclado(txtFuncion);
+        registrarCampoTeclado(txtG);
+        campoActivoTeclado = txtFuncion;
         VBox cardFuncion = card("FUNCIÓN",
-                campoConEtiqueta("f(x)", txtFuncion), crearTecladoFuncion(txtFuncion), boxG, crearTecladoFuncion(txtG),
-                campoConEtiqueta("Ejemplos", cmbEjemplo));
+                campoConEtiqueta("f(x)", txtFuncion), boxG,
+                crearTecladoCompartido(), campoConEtiqueta("Ejemplos", cmbEjemplo));
 
         // ---- Método (todos en una sola lista)
         cmbAlgoritmo = new ComboBox<>(FXCollections.observableArrayList(Metodo.values()));
@@ -201,7 +212,7 @@ public class VentanaNumericaApp extends Application {
         mostrar(boxRangoManual, false);
         chkRangoAuto.setOnAction(e -> {
             mostrar(boxRangoManual, !chkRangoAuto.isSelected());
-            if (ultimaF != null) dibujar();
+            if (ultimaF != null) { vistaInicializada = false; dibujar(); }
         });
         VBox cardGrafica = card("GRÁFICA", chkRangoAuto, boxRangoManual);
 
@@ -216,18 +227,74 @@ public class VentanaNumericaApp extends Application {
             t.setOnKeyPressed(ev -> { if (ev.getCode() == KeyCode.ENTER) resolver(); });
         }
 
-        VBox contenido = new VBox(12, cardFuncion, cardMetodo, cardParams, cardGrafica, btnResolver);
-        contenido.setPadding(new Insets(16, 12, 16, 16));
+        VBox contenido = new VBox(8, cardFuncion, cardMetodo, cardParams, cardGrafica, btnResolver);
+        contenido.setPadding(new Insets(4, 6, 12, 6));
 
         ScrollPane scroll = new ScrollPane(contenido);
         scroll.setFitToWidth(true);
         scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
-        scroll.setPrefWidth(360);
-        scroll.setMinWidth(340);
+        scroll.setPrefWidth(326);
+        scroll.setMinWidth(310);
+        scroll.setMaxWidth(340);
         scroll.getStyleClass().add("panel-izq");
 
         actualizarVisibilidad();
         return scroll;
+    }
+
+    /** Mantiene el destino seleccionado aunque el usuario pulse un botón del teclado. */
+    private void registrarCampoTeclado(TextField campo) {
+        campo.focusedProperty().addListener((obs, antes, ahora) -> {
+            if (ahora) campoActivoTeclado = campo;
+        });
+        campo.setOnMouseClicked(e -> campoActivoTeclado = campo);
+    }
+
+    /** Un solo teclado para f(x) y g(x), contraído por defecto para ahorrar altura. */
+    private Node crearTecladoCompartido() {
+        String[][] teclas = {
+                {"sin(", "cos(", "tan(", "asin(", "acos(", "atan("},
+                {"ln(", "log(", "exp(", "sqrt(", "abs(", "pi"},
+                {"x", "(", ")", "^", "/", "*", "-", "+"},
+                {"7", "8", "9", "4", "5", "6", "1", "2", "3", "0", ".", ","}
+        };
+        VBox teclado = new VBox(4);
+        for (String[] fila : teclas) {
+            HBox botones = new HBox(3);
+            for (String simbolo : fila) {
+                Button b = new Button(simbolo);
+                b.getStyleClass().add("tecla-matematica");
+                b.setMinWidth(0);
+                b.setMaxWidth(Double.MAX_VALUE);
+                HBox.setHgrow(b, Priority.ALWAYS);
+                b.setOnAction(ev -> {
+                    TextField destino = campoActivoTeclado == null ? txtFuncion : campoActivoTeclado;
+                    int inicio = destino.getSelection().getStart();
+                    int fin = destino.getSelection().getEnd();
+                    destino.replaceText(inicio, fin, simbolo);
+                    destino.requestFocus();
+                    destino.positionCaret(inicio + simbolo.length());
+                });
+                botones.getChildren().add(b);
+            }
+            teclado.getChildren().add(botones);
+        }
+        Button borrar = new Button("⌫ Borrar carácter");
+        borrar.getStyleClass().add("boton-secundario");
+        borrar.setMaxWidth(Double.MAX_VALUE);
+        borrar.setOnAction(ev -> {
+            TextField destino = campoActivoTeclado == null ? txtFuncion : campoActivoTeclado;
+            int inicio = destino.getSelection().getStart();
+            int fin = destino.getSelection().getEnd();
+            if (inicio != fin) destino.deleteText(inicio, fin);
+            else if (inicio > 0) destino.deleteText(inicio - 1, inicio);
+            destino.requestFocus();
+        });
+        teclado.getChildren().add(borrar);
+        TitledPane plegable = new TitledPane("Teclado matemático · f(x) / g(x)", teclado);
+        plegable.setExpanded(false);
+        plegable.getStyleClass().add("teclado-plegable");
+        return plegable;
     }
 
     /** Teclado matemático: inserta en la posición del cursor sin bloquear el teclado físico. */
@@ -291,13 +358,25 @@ public class VentanaNumericaApp extends Application {
         valFRaiz = new Label("—");
         valIter = new Label("—");
         valError = new Label("—");
-        HBox stats = new HBox(12,
-                stat("RAÍZ EXACTA (si se identifica)", valRaizExacta = new Label("—"), false),
-                stat("RAÍZ APROXIMADA", valRaiz, true),
-                stat("f(raíz)", valFRaiz, false),
-                stat("ITERACIONES", valIter, false),
-                stat("ERROR FINAL", valError, false));
-        stats.getChildren().forEach(n -> HBox.setHgrow(n, Priority.ALWAYS));
+        // Resumen compacto en dos filas: más altura útil para el plano.
+        // La raíz exacta conserva doble ancho para expresiones extensas.
+        GridPane stats = new GridPane();
+        stats.getStyleClass().add("stats-grid");
+        stats.setHgap(6);
+        stats.setVgap(5);
+        for (int i = 0; i < 3; i++) {
+            ColumnConstraints columna = new ColumnConstraints();
+            columna.setPercentWidth(100.0 / 3);
+            columna.setMinWidth(0);
+            columna.setHgrow(Priority.ALWAYS);
+            stats.getColumnConstraints().add(columna);
+        }
+        VBox raizExacta = stat("RAÍZ EXACTA (si se identifica)", valRaizExacta = new Label("—"), false);
+        stats.add(raizExacta, 0, 0, 2, 1);
+        stats.add(stat("RAÍZ APROXIMADA", valRaiz, true), 2, 0);
+        stats.add(stat("f(raíz)", valFRaiz, false), 0, 1);
+        stats.add(stat("ITERACIONES", valIter, false), 1, 1);
+        stats.add(stat("ERROR FINAL", valError, false), 2, 1);
 
         lblEstado = new Label("Ingresá los datos y presioná «Resolver y graficar».");
         lblEstado.setWrapText(true);
@@ -316,8 +395,9 @@ public class VentanaNumericaApp extends Application {
         tabs.getTabs().addAll(tabGrafica, tabTabla, tabDesarrollo, tabComparar);
         VBox.setVgrow(tabs, Priority.ALWAYS);
 
-        VBox v = new VBox(12, stats, lblEstado, tabs);
-        v.setPadding(new Insets(16, 16, 16, 4));
+        VBox v = new VBox(6, stats, lblEstado, tabs);
+        v.setPadding(new Insets(7, 10, 7, 4));
+        VBox.setVgrow(tabs, Priority.ALWAYS);
         // Reserva espacio real para las columnas de la tabla en el área de resultados.
         v.setMinWidth(760);
         return v;
@@ -540,16 +620,37 @@ public class VentanaNumericaApp extends Application {
                 "f(x) = " + (Double.isFinite(r.raiz) ? num(ultimaF.applyAsDouble(r.raiz)) : "no definido"),
                 "Iteraciones realizadas: " + r.iteraciones(),
                 "Error final: " + num(r.errorFinal()),
-                r.convergio ? "Conclusión: el método convergió según la tolerancia indicada." :
+                r.convergio ? (m == Metodo.PUNTO_FIJO
+                        ? "Conclusión: " + r.mensaje
+                        : "Conclusión: el método convergió según la tolerancia indicada.") :
                         "Conclusión: no se alcanzó la tolerancia indicada. Revisá los datos iniciales o el criterio."));
     }
 
     private VBox stat(String titulo, Label valor, boolean destacado) {
         Label t = new Label(titulo);
         t.getStyleClass().add("stat-titulo");
+        t.setWrapText(true);
+        t.setMinWidth(0);
+        t.setMaxWidth(Double.MAX_VALUE);
+
         valor.getStyleClass().addAll("stat-valor", "mono");
         if (destacado) valor.getStyleClass().add("stat-destacado");
-        VBox b = new VBox(4, t, valor);
+        valor.setWrapText(true);                // Permite varias líneas para cifras extensas.
+        valor.setMinWidth(0);                  // No obliga a ensanchar las columnas.
+        valor.setMaxWidth(Double.MAX_VALUE);
+        valor.setTextOverrun(OverrunStyle.CLIP);
+        valor.setMaxHeight(35);             // Hasta dos líneas; el tooltip conserva el valor completo.
+
+        // El texto completo también queda disponible al pasar el mouse.
+        Tooltip detalle = new Tooltip();
+        detalle.textProperty().bind(valor.textProperty());
+        detalle.setWrapText(true);
+        detalle.setMaxWidth(600);
+        valor.setTooltip(detalle);
+
+        VBox b = new VBox(1, t, valor);
+        b.setMinWidth(0);
+        b.setMaxWidth(Double.MAX_VALUE);
         b.getStyleClass().add("stat");
         return b;
     }
@@ -562,47 +663,89 @@ public class VentanaNumericaApp extends Application {
         chkVerF.setSelected(true);
         chkVerG.setSelected(true);
         chkVerIter.setSelected(true);
-        for (CheckBox c : List.of(chkVerF, chkVerG, chkVerIter)) c.setOnAction(e -> { if (ultimaF != null) dibujar(); });
+        for (CheckBox c : List.of(chkVerF, chkVerG, chkVerIter)) {
+            c.setOnAction(e -> { actualizarLeyenda(); dibujar(); });
+        }
 
-        leyenda = new HBox(16);
-        leyenda.setAlignment(Pos.CENTER_RIGHT);
+        lblFormulaGrafica = new Label("Plano cartesiano · escala 1:1");
+        lblFormulaGrafica.getStyleClass().add("grafica-formula");
+        lblFormulaGrafica.setMaxWidth(Double.MAX_VALUE);
+        lblFormulaGrafica.setEllipsisString("…");
+
+        Button acercar = botonGrafica("+", "Acercar", () -> zoomEnCentro(0.75));
+        Button alejar = botonGrafica("−", "Alejar", () -> zoomEnCentro(1.0 / 0.75));
+        Button ajustar = botonGrafica("Ajustar", "Ajustar vista a los datos", () -> {
+            vistaInicializada = false;
+            dibujar();
+        });
+        Button origen = botonGrafica("Origen", "Centrar en (0, 0)", () -> {
+            centroX = 0;
+            centroY = 0;
+            dibujar();
+        });
+
         Region espacio = new Region();
         HBox.setHgrow(espacio, Priority.ALWAYS);
-        lblPuntoGrafica = new Label("Seleccioná un punto de la gráfica para ver sus coordenadas.");
-        lblPuntoGrafica.getStyleClass().add("subtitulo");
-        lblPuntoGrafica.setWrapText(true);
-        lblPuntoGrafica.setMaxWidth(Double.MAX_VALUE);
-        HBox barra = new HBox(12, chkVerF, chkVerG, chkVerIter, espacio, leyenda);
+        HBox herramientas = new HBox(6, acercar, alejar, ajustar, origen);
+        herramientas.setAlignment(Pos.CENTER_RIGHT);
+        HBox barra = new HBox(10, chkVerF, chkVerG, chkVerIter, espacio, herramientas);
         barra.setAlignment(Pos.CENTER_LEFT);
-        barra.setPadding(new Insets(4, 4, 0, 4));
+        barra.getStyleClass().add("grafica-barra");
 
-        NumberAxis xAxis = new NumberAxis();
-        NumberAxis yAxis = new NumberAxis();
-        xAxis.setLabel("x");
-        yAxis.setLabel("y");
-        xAxis.setAutoRanging(false);
-        yAxis.setAutoRanging(false);
-        javafx.util.StringConverter<Number> formatoEje = new javafx.util.StringConverter<Number>() {
-            @Override public String toString(Number valor) { return valor == null ? "" : num(valor.doubleValue()); }
-            @Override public Number fromString(String texto) { return Double.parseDouble(texto.replace(',', '.')); }
-        };
-        xAxis.setTickLabelFormatter(formatoEje);
-        yAxis.setTickLabelFormatter(formatoEje);
-        xAxis.setMinorTickVisible(false);
-        yAxis.setMinorTickVisible(false);
+        lienzoGrafica = new Canvas();
+        lienzoGrafica.setManaged(false);
+        // El lienzo superior dibuja solo la mira del mouse: no recalcula curvas.
+        lienzoCursor = new Canvas();
+        lienzoCursor.setManaged(false);
+        lienzoCursor.setFocusTraversable(true);
+        contenedorGrafica = new StackPane(lienzoGrafica, lienzoCursor);
+        contenedorGrafica.setMinHeight(220);
+        contenedorGrafica.setPrefHeight(560);
+        contenedorGrafica.getStyleClass().add("plano-cartesiano");
+        VBox.setVgrow(contenedorGrafica, Priority.ALWAYS);
 
-        grafico = new LineChart<>(xAxis, yAxis);
-        grafico.setAnimated(false);
-        grafico.setLegendVisible(false);
-        grafico.setCreateSymbols(true);
-        grafico.setTitle("Comportamiento de la función");
-        VBox.setVgrow(grafico, Priority.ALWAYS);
+        // El lienzo utiliza TODO el espacio disponible, sin la reserva variable
+        // que hacen NumberAxis y LineChart para las etiquetas de los ejes.
+        lienzoGrafica.widthProperty().bind(contenedorGrafica.widthProperty());
+        lienzoGrafica.heightProperty().bind(contenedorGrafica.heightProperty());
+        lienzoCursor.widthProperty().bind(contenedorGrafica.widthProperty());
+        lienzoCursor.heightProperty().bind(contenedorGrafica.heightProperty());
+        lienzoCursor.widthProperty().addListener((obs, viejo, nuevo) -> repintarCursor());
+        lienzoCursor.heightProperty().addListener((obs, viejo, nuevo) -> repintarCursor());
+        lienzoGrafica.widthProperty().addListener((obs, viejo, nuevo) -> dibujar());
+        lienzoGrafica.heightProperty().addListener((obs, viejo, nuevo) -> dibujar());
         instalarNavegacionGrafico();
 
-        VBox v = new VBox(6, barra, lblPuntoGrafica, grafico);
+        leyenda = new HBox(14);
+        leyenda.setAlignment(Pos.CENTER_LEFT);
+        lblCoordenadasGrafica = new Label("Mover: arrastrar  ·  Zoom: rueda o +/−  ·  Doble clic: ajustar");
+        lblCoordenadasGrafica.getStyleClass().add("grafica-coordenadas");
+        lblPuntoGrafica = new Label("Hacé clic cerca de una iteración o de la raíz para ver sus valores.");
+        lblPuntoGrafica.getStyleClass().add("subtitulo");
+        lblPuntoGrafica.setWrapText(false);
+        lblPuntoGrafica.setTextOverrun(OverrunStyle.ELLIPSIS);
+        lblPuntoGrafica.setMaxWidth(Double.MAX_VALUE);
+        Tooltip ayudaPunto = new Tooltip();
+        ayudaPunto.textProperty().bind(lblPuntoGrafica.textProperty());
+        lblPuntoGrafica.setTooltip(ayudaPunto);
+        actualizarLeyenda();
+
+        // La fórmula comparte línea con la barra de herramientas.
+        // Los mensajes inferiores se apilan con espacios mínimos para dejar
+        // la mayor superficie posible al plano cartesiano.
+        VBox v = new VBox(4, barra, lblFormulaGrafica, contenedorGrafica,
+                leyenda, lblCoordenadasGrafica, lblPuntoGrafica);
         v.getStyleClass().add("panel-grafica");
-        v.setPadding(new Insets(10));
+        v.setPadding(new Insets(5));
         return v;
+    }
+
+    private Button botonGrafica(String texto, String ayuda, Runnable accion) {
+        Button boton = new Button(texto);
+        boton.getStyleClass().add("grafica-boton");
+        boton.setTooltip(new Tooltip(ayuda));
+        boton.setOnAction(e -> accion.run());
+        return boton;
     }
 
     // ------------------------------------------------------------------ tabla
@@ -753,8 +896,10 @@ public class VentanaNumericaApp extends Application {
             ultimoA = a; ultimoB = b; ultimoX0 = x0; ultimoX1 = x1;
 
             mostrarResultado(m, r);
-            if (lblPuntoGrafica != null) lblPuntoGrafica.setText("Seleccioná un punto de la gráfica para ver sus coordenadas.");
-            vistaInicializada = false; // Nuevo problema: centrar de nuevo la vista.
+            if (lblPuntoGrafica != null) lblPuntoGrafica.setText("Hacé clic cerca de una iteración o de la raíz para ver sus valores.");
+            vistaInicializada = false; // Reajustar al nuevo problema, manteniendo escala 1:1.
+            actualizarLeyenda();
+            if (lblFormulaGrafica != null) lblFormulaGrafica.setTooltip(new Tooltip("f(x) = " + ultimoTextoF));
             dibujar();
 
         } catch (IllegalArgumentException ex) {
@@ -791,8 +936,16 @@ public class VentanaNumericaApp extends Application {
         valIter.setText(String.valueOf(r.iteraciones()));
         valError.setText(num(r.errorFinal()));
         if (r.convergio) {
-            setEstado("ok", "✔  " + r.mensaje + "  ·  " + m);
-            setBadge("Convergió", "ok");
+            boolean puntoFijoSinRaizVerificada = m == Metodo.PUNTO_FIJO
+                    && (!Double.isFinite(ultimaF.applyAsDouble(r.raiz))
+                    || Math.abs(ultimaF.applyAsDouble(r.raiz)) > numero(txtEpsilon, "la tolerancia"));
+            if (puntoFijoSinRaizVerificada) {
+                setEstado("warn", "⚠  " + r.mensaje);
+                setBadge("Punto fijo alcanzado", "warn");
+            } else {
+                setEstado("ok", "✔  " + r.mensaje + "  ·  " + m);
+                setBadge("Convergió", "ok");
+            }
         } else {
             setEstado("warn", "⚠  " + r.mensaje + "  Probá con otro punto inicial o más iteraciones.");
             setBadge("No convergió", "warn");
@@ -826,277 +979,429 @@ public class VentanaNumericaApp extends Application {
         return new double[]{lo - pad, hi + pad};
     }
 
-    private void instalarInfoPunto(XYChart.Data<Number, Number> dato, String titulo, String... lineas) {
-        final String detalle = titulo + "\n" + String.join("\n", lineas);
-        dato.nodeProperty().addListener((obs, anterior, nodo) -> {
-            if (nodo == null) return;
-            Tooltip.install(nodo, new Tooltip(detalle));
-            nodo.setOnMouseClicked(evento -> {
-                if (evento.getButton() == MouseButton.PRIMARY && lblPuntoGrafica != null) {
-                    lblPuntoGrafica.setText(detalle.replace("\n", "     |     "));
-                    evento.consume();
-                }
-            });
-        });
+    // ======================================================= PLANO CARTESIANO
+    // Se dibuja sobre un Canvas con una sola escala (unidadesPorPixel).
+    // Por construcción, 1 unidad horizontal ocupa exactamente los mismos
+    // píxeles que 1 unidad vertical, incluso al cambiar el tamaño o hacer zoom.
+    private void dibujar() {
+        if (lienzoGrafica == null) return;
+        double w = lienzoGrafica.getWidth(), h = lienzoGrafica.getHeight();
+        if (w < 40 || h < 40) return;
+
+        if (!vistaInicializada) inicializarVista(w, h);
+        GraphicsContext gc = lienzoGrafica.getGraphicsContext2D();
+        gc.clearRect(0, 0, w, h);
+        gc.setFill(Color.web("#0B141A"));
+        gc.fillRect(0, 0, w, h);
+        gc.save();
+        gc.beginPath();
+        gc.rect(0, 0, w, h);
+        gc.clip();
+
+        dibujarCuadricula(gc, w, h);
+        if (ultimaF != null) {
+            if (chkVerF.isSelected()) {
+                trazarFuncion(gc, ultimaF, COLOR[0], 2.5, w, h);
+            }
+            if (ultimoMetodo != null && ultimoMetodo.usaG() && chkVerG.isSelected() && ultimaG != null) {
+                trazarFuncion(gc, x -> x, COLOR[2], 1.6, w, h);
+                trazarFuncion(gc, ultimaG, COLOR[1], 2.5, w, h);
+            }
+            if (chkVerIter.isSelected() && ultimoResultado != null) dibujarIteraciones(gc, w, h);
+            if (ultimoResultado != null && !ultimoResultado.fallo && ok(ultimoResultado.raiz)) {
+                dibujarRaiz(gc, ultimoResultado.raiz, w, h);
+            }
+        }
+
+        gc.restore();
+        repintarCursor();
+        if (lblFormulaGrafica != null) {
+            lblFormulaGrafica.setText(ultimaF == null
+                    ? "Plano cartesiano · escala 1:1"
+                    : "f(x) = " + ultimoTextoF + "     ·     escala idéntica en X e Y");
+        }
     }
 
-    private void dibujar() {
-        grafico.getData().clear();
-        leyenda.getChildren().clear();
-        if (ultimaF == null) return;
-
-        double[] rx = rangoX();
-        double ux = pasoLindo((rx[1] - rx[0]) / 10.0);
-        double xmin = Math.floor(rx[0] / ux) * ux, xmax = Math.ceil(rx[1] / ux) * ux;
-        boolean fp = ultimoMetodo.usaG();
-        boolean verF = chkVerF.isSelected();
-        boolean verG = fp && chkVerG.isSelected();
-        boolean verIt = chkVerIter.isSelected();
-        if (!verF && !verG) verF = true;
-
-        final int N = 400;
-        double[] xs = new double[N + 1], fy = new double[N + 1], gy = new double[N + 1];
-        for (int i = 0; i <= N; i++) {
-            xs[i] = xmin + (xmax - xmin) * i / N;
-            fy[i] = ultimaF.applyAsDouble(xs[i]);
-            gy[i] = fp ? ultimaG.applyAsDouble(xs[i]) : Double.NaN;
-        }
-
-        // rango vertical robusto (ignora asíntotas y valores absurdos)
-        List<Double> ys = new ArrayList<>();
-        for (int i = 0; i <= N; i++) {
-            if (verF && ok(fy[i])) ys.add(fy[i]);
-            if (verG && ok(gy[i])) ys.add(gy[i]);
-        }
-        if (verG) { ys.add(xmin); ys.add(xmax); }
-        double lo, hi;
-        if (ys.isEmpty()) { lo = -1; hi = 1; }
-        else {
-            Collections.sort(ys);
-            lo = ys.get((int) (0.02 * (ys.size() - 1)));
-            hi = ys.get((int) (0.98 * (ys.size() - 1)));
-        }
-        lo = Math.min(lo, 0);
-        hi = Math.max(hi, 0);
-        double span = hi - lo;
-        if (span < 1e-9) span = 1;
-        lo -= 0.08 * span;
-        hi += 0.08 * span;
-        double uy = pasoLindo((hi - lo) / 8.0);
-        lo = Math.floor(lo / uy) * uy;
-        hi = Math.ceil(hi / uy) * uy;
-        // La vista conserva una proporción 1:1 en unidades/píxel.
-        // El rango vertical automático anterior se usa solo para elegir el centro inicial.
-        if (!vistaInicializada) {
-            centroX = (ultimoResultado != null
-                    && !ultimoResultado.fallo
-                    && Double.isFinite(ultimoResultado.raiz))
-                    ? ultimoResultado.raiz
-                    : (xmin + xmax) / 2.0;
-
+    private void inicializarVista(double w, double h) {
+        if (ultimaF == null || ultimoMetodo == null) {
+            centroX = 0;
             centroY = 0;
-            double ancho = anchoTrazado();
-            unidadesPorPixel = Math.max(10.0, xmax - xmin) / ancho;
-            vistaInicializada = true;
+            unidadesPorPixel = Math.max(10.0 / w, 6.0 / h);
+        } else {
+            double[] r = rangoX();
+            // Con rango manual, el centro respeta el intervalo indicado.
+            boolean manual = chkRangoAuto != null && !chkRangoAuto.isSelected();
+            centroX = !manual && ultimoResultado != null && !ultimoResultado.fallo
+                    && ok(ultimoResultado.raiz) ? ultimoResultado.raiz : (r[0] + r[1]) / 2.0;
+            centroY = 0;
+            double spanX = Math.max(1e-9, r[1] - r[0]);
+            double radioNecesario = Math.max(centroX - r[0], r[1] - centroX);
+            unidadesPorPixel = Math.max(Math.max(2.0 * radioNecesario / (w * 0.88),
+                    spanX / (w * 0.88)), 4.5 / h);
         }
-        double ancho = anchoTrazado();
-        double alto = altoTrazado();
-        xmin = centroX - ancho * unidadesPorPixel / 2.0;
-        xmax = centroX + ancho * unidadesPorPixel / 2.0;
-        lo = centroY - alto * unidadesPorPixel / 2.0;
-        hi = centroY + alto * unidadesPorPixel / 2.0;
-        ux = pasoLindo((xmax - xmin) / 10.0);
-        uy = pasoLindo((hi - lo) / 8.0);
-        double tope = 5 * (hi - lo);
-        // Volver a muestrear la función en el rango visible tras mover o hacer zoom.
-        for (int i = 0; i <= N; i++) {
-            xs[i] = xmin + (xmax - xmin) * i / N;
-            fy[i] = ultimaF.applyAsDouble(xs[i]);
-            gy[i] = fp ? ultimaG.applyAsDouble(xs[i]) : Double.NaN;
+        vistaInicializada = true;
+        if (lblCoordenadasGrafica != null) {
+            lblCoordenadasGrafica.setText("Mover: arrastrar  ·  Zoom: rueda o +/−  ·  Doble clic: ajustar");
+        }
+    }
+
+    private double graficaX(double x, double w) {
+        return w / 2.0 + (x - centroX) / unidadesPorPixel;
+    }
+
+    private double graficaY(double y, double h) {
+        return h / 2.0 - (y - centroY) / unidadesPorPixel;
+    }
+
+    private double coordenadaX(double px, double w) {
+        return centroX + (px - w / 2.0) * unidadesPorPixel;
+    }
+
+    private double coordenadaY(double py, double h) {
+        return centroY - (py - h / 2.0) * unidadesPorPixel;
+    }
+
+    /** Etiquetas que mantienen precisión al acercarse y se abrevian a escala extrema. */
+    private String etiquetaEje(double valor, double paso) {
+        if (!ok(valor) || Math.abs(valor) < paso * 1e-7) return "0";
+        int decimales = (int) Math.max(0, Math.min(12, -Math.floor(Math.log10(paso)) + 1));
+        if (Math.abs(valor) >= 1e8 || (Math.abs(valor) < 1e-7 && decimales > 10)) {
+            return String.format(Locale.ROOT, "%.4g", valor);
+        }
+        return BigDecimal.valueOf(valor).setScale(decimales, java.math.RoundingMode.HALF_UP)
+                .stripTrailingZeros().toPlainString();
+    }
+
+    private void dibujarCuadricula(GraphicsContext gc, double w, double h) {
+        double xmin = coordenadaX(0, w), xmax = coordenadaX(w, w);
+        double ymin = coordenadaY(h, h), ymax = coordenadaY(0, h);
+
+        // Cuadrícula dinámica: divisiones 1, 2 o 5 × 10^n, con marcas menores.
+        // La referencia es una distancia en PÍXELES, no un rango X o Y aislado.
+        double mayor = pasoLindo(unidadesPorPixel * 95.0);
+        double menor = mayor / 5.0;
+        if (menor / unidadesPorPixel >= 12) {
+            gc.setStroke(Color.web("#213139"));
+            gc.setLineWidth(0.65);
+            lineasVerticales(gc, xmin, xmax, menor, w, h);
+            lineasHorizontales(gc, ymin, ymax, menor, w, h);
         }
 
-        XYChart.Series<Number, Number> sF = new XYChart.Series<>();
-        XYChart.Series<Number, Number> sG = new XYChart.Series<>();
-        XYChart.Series<Number, Number> sId = new XYChart.Series<>();
-        XYChart.Series<Number, Number> sCero = new XYChart.Series<>();
-        XYChart.Series<Number, Number> sCob = new XYChart.Series<>();
-        XYChart.Series<Number, Number> sIt = new XYChart.Series<>();
-        XYChart.Series<Number, Number> sRaiz = new XYChart.Series<>();
+        gc.setStroke(Color.web("#354951"));
+        gc.setLineWidth(1.0);
+        lineasVerticales(gc, xmin, xmax, mayor, w, h);
+        lineasHorizontales(gc, ymin, ymax, mayor, w, h);
 
-        for (int i = 0; i <= N; i++) {
-            if (verF && ok(fy[i])) sF.getData().add(new XYChart.Data<>(xs[i], clamp(fy[i], lo - tope, hi + tope)));
-            if (verG && ok(gy[i])) sG.getData().add(new XYChart.Data<>(xs[i], clamp(gy[i], lo - tope, hi + tope)));
-        }
-        if (verG) {
-            sId.getData().add(new XYChart.Data<>(xmin, xmin));
-            sId.getData().add(new XYChart.Data<>(xmax, xmax));
-        }
-        sCero.getData().add(new XYChart.Data<>(xmin, 0));
-        sCero.getData().add(new XYChart.Data<>(xmax, 0));
+        // Ejes verdaderos en cero; no se simula el eje X dibujando una serie.
+        double ejeX = graficaX(0, w), ejeY = graficaY(0, h);
+        gc.setStroke(Color.web("#91A5AC"));
+        gc.setLineWidth(1.6);
+        if (ejeX >= 0 && ejeX <= w) gc.strokeLine(ejeX + .5, 0, ejeX + .5, h);
+        if (ejeY >= 0 && ejeY <= h) gc.strokeLine(0, ejeY + .5, w, ejeY + .5);
 
-        Resultado r = ultimoResultado;
-        if (verIt && r != null && !r.filas.isEmpty()) {
-            if (ultimoMetodo == Metodo.PUNTO_FIJO) {
-                // telaraña (cobweb)
-                int lim = Math.min(r.filas.size(), 60);
-                sCob.getData().add(new XYChart.Data<>(r.filas.get(0).x, 0));
-                for (int i = 0; i < lim; i++) {
-                    double xi = r.filas.get(i).x, gi = r.filas.get(i).gx;
-                    if (!ok(xi) || !ok(gi) || Math.abs(gi) > 1e6) break;
-                    sCob.getData().add(new XYChart.Data<>(xi, gi));
-                    sCob.getData().add(new XYChart.Data<>(gi, gi));
-                }
+        // Cuando el origen queda fuera, las etiquetas permanecen visibles en
+        // un margen fijo del plano, como en una calculadora gráfica.
+        double textoEjeX = ejeY >= 22 && ejeY <= h - 24 ? ejeY + 16 : h - 10;
+        double textoEjeY = ejeX >= 40 && ejeX <= w - 100 ? ejeX + 8 : 8;
+        gc.setFont(Font.font("Consolas", 11));
+        gc.setFill(Color.web("#AEBAC1"));
+        gc.setTextAlign(TextAlignment.CENTER);
+        long xInicio = (long) Math.ceil(xmin / mayor);
+        long xFin = (long) Math.floor(xmax / mayor);
+        for (long i = xInicio; i <= xFin && i - xInicio < 120; i++) {
+            double v = i * mayor;
+            double px = graficaX(v, w);
+            if (px < 28 || px > w - 28) continue;
+            if (Math.abs(v) < mayor * 1e-7 && ejeX >= 0 && ejeX <= w && ejeY >= 0 && ejeY <= h) continue;
+            gc.fillText(etiquetaEje(v, mayor), px, textoEjeX);
+        }
+
+        gc.setTextAlign(TextAlignment.LEFT);
+        long yInicio = (long) Math.ceil(ymin / mayor);
+        long yFin = (long) Math.floor(ymax / mayor);
+        for (long i = yInicio; i <= yFin && i - yInicio < 120; i++) {
+            double v = i * mayor;
+            double py = graficaY(v, h);
+            if (py < 14 || py > h - 14) continue;
+            if (Math.abs(v) < mayor * 1e-7 && ejeX >= 0 && ejeX <= w && ejeY >= 0 && ejeY <= h) continue;
+            gc.fillText(etiquetaEje(v, mayor), textoEjeY, py - 5);
+        }
+        if (ejeX >= 0 && ejeX <= w && ejeY >= 0 && ejeY <= h) {
+            gc.setTextAlign(TextAlignment.LEFT);
+            gc.fillText("0", Math.min(w - 16, ejeX + 7), Math.min(h - 7, ejeY + 15));
+        }
+        gc.setTextAlign(TextAlignment.LEFT);
+        gc.setFont(Font.font("Segoe UI", 12));
+        gc.setFill(Color.web("#D1D7DB"));
+        gc.fillText("x", w - 16, Math.min(Math.max(17, ejeY - 7), h - 15));
+        gc.fillText("y", Math.min(Math.max(11, ejeX + 9), w - 20), 18);
+    }
+
+    private void lineasVerticales(GraphicsContext gc, double min, double max,
+                                  double paso, double w, double h) {
+        if (!(paso > 0) || !ok(min) || !ok(max)) return;
+        long inicio = (long) Math.ceil(min / paso), fin = (long) Math.floor(max / paso);
+        for (long i = inicio; i <= fin && i - inicio < 400; i++) {
+            double px = graficaX(i * paso, w);
+            if (px >= 0 && px <= w) gc.strokeLine(Math.floor(px) + .5, 0, Math.floor(px) + .5, h);
+        }
+    }
+
+    private void lineasHorizontales(GraphicsContext gc, double min, double max,
+                                    double paso, double w, double h) {
+        if (!(paso > 0) || !ok(min) || !ok(max)) return;
+        long inicio = (long) Math.ceil(min / paso), fin = (long) Math.floor(max / paso);
+        for (long i = inicio; i <= fin && i - inicio < 400; i++) {
+            double py = graficaY(i * paso, h);
+            if (py >= 0 && py <= h) gc.strokeLine(0, Math.floor(py) + .5, w, Math.floor(py) + .5);
+        }
+    }
+
+    private void trazarFuncion(GraphicsContext gc, DoubleUnaryOperator f, String color,
+                               double grosor, double w, double h) {
+        int muestras = Math.max(400, Math.min(1800, (int) (w * 1.3)));
+        gc.setStroke(Color.web(color));
+        gc.setLineWidth(grosor);
+        gc.setLineDashes();
+        gc.beginPath();
+        boolean segmento = false;
+        double pyAnterior = Double.NaN;
+        for (int i = 0; i <= muestras; i++) {
+            double px = w * i / muestras;
+            double x = coordenadaX(px, w);
+            double y;
+            try { y = f.applyAsDouble(x); }
+            catch (RuntimeException ex) { y = Double.NaN; }
+            double py = graficaY(y, h);
+            if (!ok(py) || Math.abs(py) > Math.max(50000, h * 60)) {
+                segmento = false;
+                continue;
             }
-            for (Fila f : r.filas) {
-                double y = fp ? f.gx : f.fx;
-                if (!ok(f.x) || !ok(y)) continue;
-                XYChart.Data<Number, Number> d = new XYChart.Data<>(f.x, y);
-                final String nombreX = (ultimoMetodo.esCerrado() ? "c" : "x") + "₍" + f.n + "₎";
-                final String nombreY = fp ? "g(xₙ)" : "f(xₙ)";
-                if (fp) {
-                    instalarInfoPunto(d, "Iteración " + f.n,
-                            nombreX + " = " + num(f.x),
-                            "f(xₙ) = " + num(f.fx),
-                            nombreY + " = " + num(y));
-                } else {
-                    instalarInfoPunto(d, "Iteración " + f.n,
-                            nombreX + " = " + num(f.x),
-                            nombreY + " = " + num(y));
+            // No conectar dos ramas a través de una asíntota vertical.
+            if (!segmento || Math.abs(py - pyAnterior) > Math.max(500, 2.5 * h)) {
+                gc.moveTo(px, py);
+            } else {
+                gc.lineTo(px, py);
+            }
+            pyAnterior = py;
+            segmento = true;
+        }
+        gc.stroke();
+    }
+
+    private void dibujarIteraciones(GraphicsContext gc, double w, double h) {
+        if (ultimoResultado == null || ultimoMetodo == null) return;
+        List<Fila> filas = ultimoResultado.filas;
+        if (filas.isEmpty()) return;
+
+        if (ultimoMetodo == Metodo.PUNTO_FIJO) {
+            gc.setStroke(Color.web(COLOR[4]));
+            gc.setLineWidth(1.5);
+            gc.setLineDashes(4, 4);
+            gc.beginPath();
+            double prev = filas.get(0).x;
+            if (ok(prev)) {
+                gc.moveTo(graficaX(prev, w), graficaY(0, h));
+                for (int i = 0; i < Math.min(65, filas.size()); i++) {
+                    Fila fila = filas.get(i);
+                    if (!ok(fila.x) || !ok(fila.gx)) break;
+                    // Cobweb: vertical hasta g(x_n), luego horizontal a y = x.
+                    gc.lineTo(graficaX(fila.x, w), graficaY(fila.gx, h));
+                    gc.lineTo(graficaX(fila.gx, w), graficaY(fila.gx, h));
                 }
-                sIt.getData().add(d);
+                gc.stroke();
+            }
+            gc.setLineDashes();
+        }
+
+        gc.setFill(Color.web(COLOR[5]));
+        int salto = Math.max(1, filas.size() / 1200);
+        for (int i = 0; i < filas.size(); i += salto) {
+            Fila fila = filas.get(i);
+            double valor = ultimoMetodo.usaG() ? fila.gx : fila.fx;
+            if (!ok(fila.x) || !ok(valor)) continue;
+            double px = graficaX(fila.x, w), py = graficaY(valor, h);
+            if (px >= -5 && px <= w + 5 && py >= -5 && py <= h + 5) {
+                gc.fillOval(px - 3.5, py - 3.5, 7, 7);
             }
         }
-        if (r != null && !r.fallo && ok(r.raiz)) {
-            XYChart.Data<Number, Number> d = new XYChart.Data<>(r.raiz, 0);
-            instalarInfoPunto(d, "Raíz aproximada", "x = " + num(r.raiz), "f(x) = " + num(ultimaF.applyAsDouble(r.raiz)));
-            sRaiz.getData().add(d);
-        }
+    }
 
-        // eje X / Y
-        NumberAxis ax = (NumberAxis) grafico.getXAxis();
-        NumberAxis ay = (NumberAxis) grafico.getYAxis();
-        ax.setLowerBound(xmin);
-        ax.setUpperBound(xmax);
-        ax.setTickUnit(ux);
-        ay.setLowerBound(lo);
-        ay.setUpperBound(hi);
-        ay.setTickUnit(uy);
+    private void dibujarRaiz(GraphicsContext gc, double raiz, double w, double h) {
+        double px = graficaX(raiz, w), py = graficaY(0, h);
+        if (px < -12 || px > w + 12 || py < -12 || py > h + 12) return;
+        gc.setFill(Color.web("#0B141A"));
+        gc.fillOval(px - 8, py - 8, 16, 16);
+        gc.setStroke(Color.web(COLOR[6]));
+        gc.setLineWidth(2.6);
+        gc.strokeOval(px - 6.5, py - 6.5, 13, 13);
+        gc.setFill(Color.web(COLOR[6]));
+        gc.fillOval(px - 3.5, py - 3.5, 7, 7);
+    }
 
-        grafico.setTitle("f(x) = " + ultimoTextoF);
-        // IMPORTANTE: el orden fija el color (default-color0..6 en el CSS)
-        grafico.getData().addAll(List.of(sF, sG, sId, sCero, sCob, sIt, sRaiz));
+    private void repintarCursor() {
+        if (lienzoCursor == null) return;
+        GraphicsContext gc = lienzoCursor.getGraphicsContext2D();
+        double w = lienzoCursor.getWidth(), h = lienzoCursor.getHeight();
+        gc.clearRect(0, 0, w, h);
+        if (!cursorEnGrafica || arrastrando) return;
+        dibujarCursor(gc, w, h);
+    }
 
-        // leyenda
-        if (verF) leyenda.getChildren().add(itemLeyenda(COLOR[0], "f(x)", false));
-        if (verG) {
+    private void dibujarCursor(GraphicsContext gc, double w, double h) {
+        if (cursorPx < 0 || cursorPx > w || cursorPy < 0 || cursorPy > h) return;
+        gc.setStroke(Color.web("#637D83", 0.70));
+        gc.setLineDashes(4, 5);
+        gc.setLineWidth(1);
+        gc.strokeLine(cursorPx, 0, cursorPx, h);
+        gc.strokeLine(0, cursorPy, w, cursorPy);
+        gc.setLineDashes();
+    }
+
+    private void actualizarLeyenda() {
+        if (leyenda == null || chkVerF == null) return;
+        leyenda.getChildren().clear();
+        if (chkVerF.isSelected()) leyenda.getChildren().add(itemLeyenda(COLOR[0], "f(x)", false));
+        if (ultimoMetodo != null && ultimoMetodo.usaG() && chkVerG.isSelected()) {
             leyenda.getChildren().add(itemLeyenda(COLOR[1], "g(x)", false));
             leyenda.getChildren().add(itemLeyenda(COLOR[2], "y = x", true));
         }
-        if (!sCob.getData().isEmpty()) leyenda.getChildren().add(itemLeyenda(COLOR[4], "telaraña", false));
-        if (!sIt.getData().isEmpty()) leyenda.getChildren().add(itemLeyenda(COLOR[5], "iteraciones", false));
-        if (!sRaiz.getData().isEmpty()) leyenda.getChildren().add(itemLeyenda(COLOR[6], "raíz", false));
+        if (ultimoMetodo != null && chkVerIter.isSelected()) {
+            if (ultimoMetodo == Metodo.PUNTO_FIJO) leyenda.getChildren().add(itemLeyenda(COLOR[4], "telaraña", true));
+            leyenda.getChildren().add(itemLeyenda(COLOR[5], "iteraciones", false));
+        }
+        if (ultimoResultado != null && !ultimoResultado.fallo && ok(ultimoResultado.raiz)) {
+            leyenda.getChildren().add(itemLeyenda(COLOR[6], "raíz", false));
+        }
     }
 
     // ================================================= NAVEGACIÓN DEL GRÁFICO
-    private Region obtenerZonaTrazado() {
-        if (zonaTrazado == null && grafico != null) {
-            Node nodo = grafico.lookup(".chart-plot-background");
-            if (nodo instanceof Region) zonaTrazado = (Region) nodo;
-        }
-        return zonaTrazado;
-    }
-
-    private double anchoTrazado() {
-        Region z = obtenerZonaTrazado();
-        return z != null && z.getWidth() > 1 ? z.getWidth() : 600;
-    }
-
-    private double altoTrazado() {
-        Region z = obtenerZonaTrazado();
-        return z != null && z.getHeight() > 1 ? z.getHeight() : 380;
-    }
-
-    private boolean dentroZona(double escenaX, double escenaY) {
-        Region z = obtenerZonaTrazado();
-        if (z == null) return false;
-        Point2D p = z.sceneToLocal(escenaX, escenaY);
-        return p.getX() >= 0 && p.getX() <= z.getWidth()
-                && p.getY() >= 0 && p.getY() <= z.getHeight();
-    }
-
-    private boolean esSimboloGrafico(Object objetivo) {
-        Node nodo = objetivo instanceof Node ? (Node) objetivo : null;
-        while (nodo != null && nodo != grafico) {
-            if (nodo.getStyleClass().contains("chart-line-symbol")) return true;
-            nodo = nodo.getParent();
-        }
-        return false;
-    }
-
     private void instalarNavegacionGrafico() {
-        grafico.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_PRESSED, e -> {
-            if (e.getButton() != MouseButton.PRIMARY || !vistaInicializada
-                    || !dentroZona(e.getSceneX(), e.getSceneY()) || esSimboloGrafico(e.getTarget())) return;
+        lienzoCursor.setOnMouseMoved(e -> {
+            cursorEnGrafica = true;
+            cursorPx = e.getX();
+            cursorPy = e.getY();
+            actualizarCoordenadas(e.getX(), e.getY());
+            repintarCursor();
+        });
+        lienzoCursor.setOnMouseExited(e -> {
+            cursorEnGrafica = false;
+            if (lblCoordenadasGrafica != null) {
+                lblCoordenadasGrafica.setText("Mover: arrastrar  ·  Zoom: rueda o +/−  ·  Doble clic: ajustar");
+            }
+            repintarCursor();
+        });
+        lienzoCursor.setOnMousePressed(e -> {
+            if (e.getButton() != MouseButton.PRIMARY) return;
+            lienzoCursor.requestFocus();
             arrastrando = true;
-            arrastreX = e.getSceneX();
-            arrastreY = e.getSceneY();
-            e.consume();
+            arrastreX = e.getX();
+            arrastreY = e.getY();
         });
-
-        grafico.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_DRAGGED, e -> {
+        lienzoCursor.setOnMouseDragged(e -> {
             if (!arrastrando) return;
-            centroX -= (e.getSceneX() - arrastreX) * unidadesPorPixel;
-            centroY += (e.getSceneY() - arrastreY) * unidadesPorPixel;
-            arrastreX = e.getSceneX();
-            arrastreY = e.getSceneY();
+            centroX -= (e.getX() - arrastreX) * unidadesPorPixel;
+            centroY += (e.getY() - arrastreY) * unidadesPorPixel;
+            arrastreX = e.getX();
+            arrastreY = e.getY();
+            cursorPx = e.getX();
+            cursorPy = e.getY();
+            actualizarCoordenadas(e.getX(), e.getY());
             dibujar();
-            e.consume();
         });
-
-        grafico.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_RELEASED, e -> {
-            if (arrastrando) {
-                arrastrando = false;
-                e.consume();
+        lienzoCursor.setOnMouseReleased(e -> { arrastrando = false; repintarCursor(); });
+        lienzoCursor.setOnMouseClicked(e -> {
+            if (e.getButton() != MouseButton.PRIMARY) return;
+            if (e.getClickCount() >= 2) {
+                vistaInicializada = false;
+                dibujar();
+            } else if (lblPuntoGrafica != null) {
+                mostrarPuntoCercano(e.getX(), e.getY());
             }
         });
-
-        grafico.addEventFilter(javafx.scene.input.ScrollEvent.SCROLL, e -> {
-            if (!vistaInicializada || e.getDeltaY() == 0
-                    || !dentroZona(e.getSceneX(), e.getSceneY())) return;
-            Region z = obtenerZonaTrazado();
-            Point2D p = z.sceneToLocal(e.getSceneX(), e.getSceneY());
-            double puntoX = centroX + (p.getX() - z.getWidth() / 2) * unidadesPorPixel;
-            double puntoY = centroY - (p.getY() - z.getHeight() / 2) * unidadesPorPixel;
-            double factor = e.getDeltaY() > 0 ? 0.85 : 1.0 / 0.85;
-            double nuevaEscala = unidadesPorPixel * factor;
-            if (nuevaEscala < 1e-10 || nuevaEscala > 1e8) return;
-            centroX = puntoX + (centroX - puntoX) * factor;
-            centroY = puntoY + (centroY - puntoY) * factor;
-            unidadesPorPixel = nuevaEscala;
-            dibujar();
+        lienzoCursor.setOnScroll(e -> {
+            if (e.getDeltaY() == 0) return;
+            double factor = Math.exp(-Math.max(-500, Math.min(500, e.getDeltaY())) * 0.0022);
+            zoomAlPunto(factor, e.getX(), e.getY());
             e.consume();
         });
-
-        // Cuando se maximiza o cambia el tamaño de la ventana, conservar la escala 1:1.
-        grafico.widthProperty().addListener((obs, antes, ahora) -> reajustarVistaPorTamano());
-        grafico.heightProperty().addListener((obs, antes, ahora) -> reajustarVistaPorTamano());
+        lienzoCursor.setOnKeyPressed(e -> {
+            switch (e.getCode()) {
+                case ADD: case PLUS: case EQUALS:
+                    zoomEnCentro(0.75); break;
+                case SUBTRACT: case MINUS:
+                    zoomEnCentro(1.0 / 0.75); break;
+                case DIGIT0: case NUMPAD0:
+                    vistaInicializada = false; dibujar(); break;
+                case LEFT: centroX -= 55 * unidadesPorPixel; dibujar(); break;
+                case RIGHT: centroX += 55 * unidadesPorPixel; dibujar(); break;
+                case UP: centroY += 55 * unidadesPorPixel; dibujar(); break;
+                case DOWN: centroY -= 55 * unidadesPorPixel; dibujar(); break;
+                default: return;
+            }
+            e.consume();
+        });
     }
 
-    private boolean reajustePendiente = false;
-    private void reajustarVistaPorTamano() {
-        if (reajustePendiente) return;
-        reajustePendiente = true;
-        Platform.runLater(() -> {
-            reajustePendiente = false;
-            if (!vistaInicializada || ultimaF == null) return;
-            double ancho = anchoTrazado(), alto = altoTrazado();
-            if (Math.abs(ancho - ultimoAnchoTrazado) > 3
-                    || Math.abs(alto - ultimoAltoTrazado) > 3) {
-                ultimoAnchoTrazado = ancho;
-                ultimoAltoTrazado = alto;
-                dibujar();
+    private void actualizarCoordenadas(double px, double py) {
+        if (lblCoordenadasGrafica == null) return;
+        double x = coordenadaX(px, lienzoGrafica.getWidth());
+        double y = coordenadaY(py, lienzoGrafica.getHeight());
+        lblCoordenadasGrafica.setText("Cursor: x = " + etiquetaEje(x, unidadesPorPixel * 0.01)
+                + "     ·     y = " + etiquetaEje(y, unidadesPorPixel * 0.01));
+    }
+
+    private void mostrarPuntoCercano(double px, double py) {
+        if (ultimoResultado == null || ultimoMetodo == null) return;
+        double w = lienzoGrafica.getWidth(), h = lienzoGrafica.getHeight();
+        double menorDist = 14 * 14;
+        String descripcion = null;
+        if (!ultimoResultado.fallo && ok(ultimoResultado.raiz)) {
+            double x = graficaX(ultimoResultado.raiz, w), y = graficaY(0, h);
+            double d = (px - x) * (px - x) + (py - y) * (py - y);
+            if (d <= menorDist) {
+                menorDist = d;
+                descripcion = "Raíz aproximada  |  x = " + num(ultimoResultado.raiz)
+                        + "  |  f(x) = " + num(ultimaF.applyAsDouble(ultimoResultado.raiz));
             }
-        });
+        }
+        if (chkVerIter.isSelected()) {
+            for (Fila fila : ultimoResultado.filas) {
+                double valor = ultimoMetodo.usaG() ? fila.gx : fila.fx;
+                if (!ok(fila.x) || !ok(valor)) continue;
+                double x = graficaX(fila.x, w), y = graficaY(valor, h);
+                double d = (px - x) * (px - x) + (py - y) * (py - y);
+                if (d < menorDist) {
+                    menorDist = d;
+                    descripcion = "Iteración " + fila.n + "  |  x = " + num(fila.x)
+                            + "  |  f(x) = " + num(fila.fx)
+                            + (ultimoMetodo.usaG() ? "  |  g(x) = " + num(fila.gx) : "");
+                }
+            }
+        }
+        lblPuntoGrafica.setText(descripcion != null ? descripcion
+                : "Hacé clic cerca de una iteración o de la raíz para ver sus valores.");
+    }
+
+    private void zoomEnCentro(double factor) {
+        if (lienzoGrafica == null) return;
+        zoomAlPunto(factor, lienzoGrafica.getWidth() / 2.0, lienzoGrafica.getHeight() / 2.0);
+    }
+
+    private void zoomAlPunto(double factor, double px, double py) {
+        if (lienzoGrafica == null || !vistaInicializada) return;
+        double w = lienzoGrafica.getWidth(), h = lienzoGrafica.getHeight();
+        if (w < 40 || h < 40) return;
+        double nuevaEscala = unidadesPorPixel * factor;
+        // Evitar la pérdida de precisión de double a zoom extremo.
+        double precisionMinima = Math.max(1e-12, Math.max(Math.ulp(centroX), Math.ulp(centroY)) * 16);
+        if (!ok(nuevaEscala) || nuevaEscala < precisionMinima || nuevaEscala > 1e10) return;
+        double mundoX = coordenadaX(px, w), mundoY = coordenadaY(py, h);
+        unidadesPorPixel = nuevaEscala;
+        centroX = mundoX - (px - w / 2.0) * unidadesPorPixel;
+        centroY = mundoY + (py - h / 2.0) * unidadesPorPixel;
+        dibujar();
+        if (cursorEnGrafica) actualizarCoordenadas(cursorPx, cursorPy);
     }
 
     private Node itemLeyenda(String color, String texto, boolean punteado) {
@@ -1124,7 +1429,6 @@ public class VentanaNumericaApp extends Application {
     }
 
     private static boolean ok(double v) { return !Double.isNaN(v) && !Double.isInfinite(v); }
-    private static double clamp(double v, double lo, double hi) { return Math.max(lo, Math.min(hi, v)); }
 
     /** Representa cualquier double en decimal completo, sin notación científica (E-...). */
     private static String num(double v) {
@@ -1223,7 +1527,7 @@ public class VentanaNumericaApp extends Application {
     private static VBox card(String titulo, Node... hijos) {
         Label t = new Label(titulo);
         t.getStyleClass().add("card-titulo");
-        VBox v = new VBox(10);
+        VBox v = new VBox(7);
         v.getChildren().add(t);
         v.getChildren().addAll(hijos);
         v.getStyleClass().add("card");
@@ -1247,183 +1551,262 @@ public class VentanaNumericaApp extends Application {
         .root {
             -fx-font-family: "Segoe UI", "Inter", "Helvetica Neue", sans-serif;
             -fx-font-size: 13px;
-            -fx-background-color: #1B2632;
+            -fx-background-color: #111B21;
         }
-        .label { -fx-text-fill: #D7E2EB; }
+        .label { -fx-text-fill: #E9EDEF; }
         .mono { -fx-font-family: "Consolas", "JetBrains Mono", "Menlo", monospace; }
 
         /* Paleta gris pizarra + azul acero: superficies sobrias, acentos accesibles. */
         /* ---------- cabecera ---------- */
         .header {
-            -fx-background-color: linear-gradient(to right, #2A4052, #1B2632);
-            -fx-border-color: #354A5B; -fx-border-width: 0 0 1 0;
+            -fx-background-color: linear-gradient(to right, #202C33, #111B21);
+            -fx-border-color: #2A3942; -fx-border-width: 0 0 1 0;
             -fx-padding: 14 22 14 22;
         }
         .titulo { -fx-font-size: 21px; -fx-font-weight: bold; -fx-text-fill: white; }
-        .subtitulo { -fx-text-fill: #A2B7C7; -fx-font-size: 12px; }
+        .subtitulo { -fx-text-fill: #8696A0; -fx-font-size: 12px; }
         .badge {
-            -fx-background-color: #354A5B; -fx-background-radius: 20;
-            -fx-padding: 5 14 5 14; -fx-font-weight: bold; -fx-text-fill: #AFC3D2;
+            -fx-background-color: #2A3942; -fx-background-radius: 20;
+            -fx-padding: 5 14 5 14; -fx-font-weight: bold; -fx-text-fill: #D1D7DB;
         }
-        .badge-ok   { -fx-background-color: #26483F; -fx-text-fill: #74C8B4; }
-        .badge-warn { -fx-background-color: #514130; -fx-text-fill: #EDBA7A; }
-        .badge-err  { -fx-background-color: #51343D; -fx-text-fill: #F1A0A0; }
+        .badge-ok   { -fx-background-color: #123C33; -fx-text-fill: #25D366; }
+        .badge-warn { -fx-background-color: #4A3922; -fx-text-fill: #F0B86E; }
+        .badge-err  { -fx-background-color: #4A2630; -fx-text-fill: #FF8FA3; }
 
         /* ---------- panel izquierdo ---------- */
         .panel-izq, .panel-izq > .viewport { -fx-background-color: transparent; -fx-background: transparent; }
         .scroll-pane { -fx-background-color: transparent; -fx-padding: 0; }
         .scroll-pane > .viewport { -fx-background-color: transparent; }
         .scroll-bar { -fx-background-color: transparent; }
-        .scroll-bar .thumb { -fx-background-color: #415A6B; -fx-background-radius: 6; }
+        .scroll-bar .thumb { -fx-background-color: #324650; -fx-background-radius: 6; }
         .scroll-bar .track, .scroll-bar .increment-button, .scroll-bar .decrement-button { -fx-background-color: transparent; -fx-padding: 0; }
         .scroll-bar .increment-arrow, .scroll-bar .decrement-arrow { -fx-padding: 0; }
         .corner { -fx-background-color: transparent; }
 
         .card {
-            -fx-background-color: #273746; -fx-background-radius: 14;
-            -fx-border-color: #3A5263; -fx-border-radius: 14; -fx-padding: 14;
+            -fx-background-color: #202C33; -fx-background-radius: 14;
+            -fx-border-color: #2A3942; -fx-border-radius: 14; -fx-padding: 14;
         }
-        .card-titulo { -fx-text-fill: #80C1DF; -fx-font-size: 11px; -fx-font-weight: bold; }
-        .campo-label { -fx-text-fill: #AEC2D0; -fx-font-size: 12px; }
+        .card-titulo { -fx-text-fill: #53BDEB; -fx-font-size: 11px; -fx-font-weight: bold; }
+        .campo-label { -fx-text-fill: #AEBAC1; -fx-font-size: 12px; }
 
         .text-field {
-            -fx-background-color: #1B2632; -fx-text-fill: #F0F5F8; -fx-prompt-text-fill: #688394;
-            -fx-background-radius: 9; -fx-border-color: #415A6B; -fx-border-radius: 9;
-            -fx-padding: 8 11 8 11; -fx-highlight-fill: #4F87B4;
+            -fx-background-color: #111B21; -fx-text-fill: #E9EDEF; -fx-prompt-text-fill: #8696A0;
+            -fx-background-radius: 9; -fx-border-color: #324650; -fx-border-radius: 9;
+            -fx-padding: 8 11 8 11; -fx-highlight-fill: #00A884;
         }
-        .text-field:focused { -fx-border-color: #80C1DF; }
-        .tecla-matematica { -fx-background-color: #354D60; -fx-text-fill: #E5F1F8; -fx-background-radius: 7; -fx-padding: 6 8; }
-        .tecla-matematica:hover { -fx-background-color: #47718A; }
+        .text-field:focused { -fx-border-color: #53BDEB; }
+        .tecla-matematica { -fx-background-color: #2A3942; -fx-text-fill: #E5F1F8; -fx-background-radius: 7; -fx-padding: 6 8; }
+        .tecla-matematica:hover { -fx-background-color: #005C4B; }
 
         .combo-box {
-            -fx-background-color: #1B2632; -fx-background-radius: 9;
-            -fx-border-color: #415A6B; -fx-border-radius: 9;
+            -fx-background-color: #111B21; -fx-background-radius: 9;
+            -fx-border-color: #324650; -fx-border-radius: 9;
         }
-        .combo-box:focused { -fx-border-color: #80C1DF; }
-        .combo-box .list-cell { -fx-text-fill: #F0F5F8; -fx-background-color: transparent; -fx-padding: 7 11 7 11; }
+        .combo-box:focused { -fx-border-color: #53BDEB; }
+        .combo-box .list-cell { -fx-text-fill: #E9EDEF; -fx-background-color: transparent; -fx-padding: 7 11 7 11; }
         .combo-box .arrow-button { -fx-background-color: transparent; }
-        .combo-box .arrow { -fx-background-color: #AFC3D2; }
-        .combo-box-popup .list-view { -fx-background-color: #273746; -fx-border-color: #415A6B; -fx-background-radius: 9; -fx-border-radius: 9; }
-        .combo-box-popup .list-cell { -fx-background-color: #273746; -fx-text-fill: #E2ECF3; -fx-padding: 8 12 8 12; }
-        .combo-box-popup .list-cell:hover { -fx-background-color: #354C60; }
-        .combo-box-popup .list-cell:filled:selected { -fx-background-color: #42627C; }
+        .combo-box .arrow { -fx-background-color: #D1D7DB; }
+        .combo-box-popup .list-view { -fx-background-color: #202C33; -fx-border-color: #324650; -fx-background-radius: 9; -fx-border-radius: 9; }
+        .combo-box-popup .list-cell { -fx-background-color: #202C33; -fx-text-fill: #E9EDEF; -fx-padding: 8 12 8 12; }
+        .combo-box-popup .list-cell:hover { -fx-background-color: #30444C; }
+        .combo-box-popup .list-cell:filled:selected { -fx-background-color: #005C4B; }
 
         .seg {
-            -fx-background-color: #1B2632; -fx-text-fill: #AEC2D0; -fx-font-weight: bold;
-            -fx-border-color: #415A6B; -fx-padding: 8 10 8 10; -fx-cursor: hand;
+            -fx-background-color: #111B21; -fx-text-fill: #AEBAC1; -fx-font-weight: bold;
+            -fx-border-color: #324650; -fx-padding: 8 10 8 10; -fx-cursor: hand;
         }
         .seg-izq { -fx-background-radius: 9 0 0 9; -fx-border-radius: 9 0 0 9; }
         .seg-der { -fx-background-radius: 0 9 9 0; -fx-border-radius: 0 9 9 0; -fx-border-width: 1 1 1 0; }
-        .seg:selected { -fx-background-color: linear-gradient(to bottom, #80C1DF, #4F87B4); -fx-text-fill: white; -fx-border-color: transparent; }
+        .seg:selected { -fx-background-color: linear-gradient(to bottom, #53BDEB, #00A884); -fx-text-fill: white; -fx-border-color: transparent; }
 
-        .check-box { -fx-text-fill: #D7E2EB; }
-        .check-box .box { -fx-background-color: #1B2632; -fx-border-color: #516879; -fx-border-radius: 5; -fx-background-radius: 5; }
-        .check-box:selected .box { -fx-background-color: #80C1DF; -fx-border-color: #80C1DF; }
-        .check-box:selected .mark { -fx-background-color: #1B2632; }
+        .check-box { -fx-text-fill: #E9EDEF; }
+        .check-box .box { -fx-background-color: #111B21; -fx-border-color: #50616B; -fx-border-radius: 5; -fx-background-radius: 5; }
+        .check-box:selected .box { -fx-background-color: #53BDEB; -fx-border-color: #53BDEB; }
+        .check-box:selected .mark { -fx-background-color: #111B21; }
         .check-box:disabled { -fx-opacity: 0.4; }
 
         .boton-primario {
-            -fx-background-color: linear-gradient(to bottom right, #74C8B4, #5D9DBD);
+            -fx-background-color: linear-gradient(to bottom right, #25D366, #00A884);
             -fx-text-fill: #122B37; -fx-font-weight: bold; -fx-font-size: 14px;
             -fx-background-radius: 11; -fx-padding: 12 16 12 16; -fx-cursor: hand;
         }
         .boton-primario:hover { -fx-effect: dropshadow(gaussian, rgba(128,193,223,0.34), 16, 0.2, 0, 0); }
         .boton-primario:pressed { -fx-opacity: 0.85; }
         .boton-secundario {
-            -fx-background-color: #354D61; -fx-text-fill: #D7E2EB; -fx-background-radius: 8;
+            -fx-background-color: #2A3942; -fx-text-fill: #E9EDEF; -fx-background-radius: 8;
             -fx-padding: 6 14 6 14; -fx-cursor: hand;
         }
-        .boton-secundario:hover { -fx-background-color: #42627C; }
+        .boton-secundario:hover { -fx-background-color: #005C4B; }
 
         /* ---------- resultados ---------- */
-        .stat { -fx-background-color: #273746; -fx-background-radius: 12; -fx-border-color: #3A5263; -fx-border-radius: 12; -fx-padding: 12 16 12 16; }
-        .stat-titulo { -fx-text-fill: #A2B7C7; -fx-font-size: 10.5px; -fx-font-weight: bold; }
-        .stat-valor { -fx-text-fill: #F0F5F8; -fx-font-size: 18px; -fx-font-weight: bold; }
-        .stat-destacado { -fx-text-fill: #74C8B4; }
+        .stat { -fx-background-color: #202C33; -fx-background-radius: 10; -fx-border-color: #2A3942; -fx-border-radius: 10; -fx-padding: 7 11 7 11; }
+        .stat-titulo { -fx-text-fill: #8696A0; -fx-font-size: 9.5px; -fx-font-weight: bold; }
+        .stat-valor { -fx-text-fill: #E9EDEF; -fx-font-size: 13px; -fx-font-weight: bold; }
+        .stat-destacado { -fx-text-fill: #25D366; }
 
         .estado { -fx-background-radius: 10; -fx-padding: 10 14 10 14; -fx-border-radius: 10; -fx-font-size: 13px; }
-        .estado-info { -fx-background-color: #273746; -fx-text-fill: #AFC3D2; -fx-border-color: #3A5263; }
-        .estado-ok   { -fx-background-color: #26483F; -fx-text-fill: #74C8B4; -fx-border-color: #397B69; }
-        .estado-warn { -fx-background-color: #514130; -fx-text-fill: #EDBA7A; -fx-border-color: #84613B; }
-        .estado-err  { -fx-background-color: #51343D; -fx-text-fill: #F1A0A0; -fx-border-color: #85434C; }
+        .estado-info { -fx-background-color: #202C33; -fx-text-fill: #D1D7DB; -fx-border-color: #2A3942; }
+        .estado-ok   { -fx-background-color: #123C33; -fx-text-fill: #25D366; -fx-border-color: #1F6F5F; }
+        .estado-warn { -fx-background-color: #4A3922; -fx-text-fill: #F0B86E; -fx-border-color: #8D6B3C; }
+        .estado-err  { -fx-background-color: #4A2630; -fx-text-fill: #FF8FA3; -fx-border-color: #B84A62; }
 
         /* ---------- pestañas ---------- */
         .tab-pane > .tab-header-area > .tab-header-background { -fx-background-color: transparent; }
         .tab-pane > .tab-header-area { -fx-padding: 0 0 0 4; }
-        .tab { -fx-background-color: #233241; -fx-background-radius: 10 10 0 0; -fx-padding: 6 14 6 14; }
-        .tab:selected { -fx-background-color: #273746; }
-        .tab .tab-label { -fx-text-fill: #A2B7C7; -fx-font-weight: bold; }
+        .tab { -fx-background-color: #1F2C34; -fx-background-radius: 10 10 0 0; -fx-padding: 6 14 6 14; }
+        .tab:selected { -fx-background-color: #202C33; }
+        .tab .tab-label { -fx-text-fill: #8696A0; -fx-font-weight: bold; }
         .tab:selected .tab-label { -fx-text-fill: white; }
-        .tab-pane > .tab-content-area { -fx-background-color: #273746; -fx-background-radius: 0 12 12 12; -fx-border-color: #3A5263; -fx-border-radius: 0 12 12 12; }
+        .tab-pane > .tab-content-area { -fx-background-color: #202C33; -fx-background-radius: 0 12 12 12; -fx-border-color: #2A3942; -fx-border-radius: 0 12 12 12; }
         .tab-pane:top > .tab-header-area > .headers-region > .tab { -fx-focus-color: transparent; -fx-faint-focus-color: transparent; }
-        .leyenda-texto { -fx-text-fill: #AFC3D2; -fx-font-size: 12px; }
+        .leyenda-texto { -fx-text-fill: #D1D7DB; -fx-font-size: 12px; }
 
         /* ---------- tabla ---------- */
         .table-view {
-            -fx-background-color: #202F3C; -fx-control-inner-background: #202F3C;
-            -fx-control-inner-background-alt: #2A3B49; -fx-table-cell-border-color: transparent;
-            -fx-background-radius: 10; -fx-border-color: #3A5263; -fx-border-radius: 10;
+            -fx-background-color: #111B21; -fx-control-inner-background: #111B21;
+            -fx-control-inner-background-alt: #182229; -fx-table-cell-border-color: transparent;
+            -fx-background-radius: 10; -fx-border-color: #2A3942; -fx-border-radius: 10;
             -fx-padding: 0;
         }
-        .table-view .column-header-background { -fx-background-color: #354D61; -fx-background-radius: 10 10 0 0; }
+        .table-view .column-header-background { -fx-background-color: #2A3942; -fx-background-radius: 10 10 0 0; }
         .table-view .column-header, .table-view .filler {
-            -fx-background-color: #354D61; -fx-size: 38; -fx-border-color: transparent;
+            -fx-background-color: #2A3942; -fx-size: 38; -fx-border-color: transparent;
         }
-        .table-view .column-header .label { -fx-text-fill: #E2ECF3; -fx-font-weight: bold; -fx-alignment: CENTER; }
+        .table-view .column-header .label { -fx-text-fill: #E9EDEF; -fx-font-weight: bold; -fx-alignment: CENTER; }
         .table-row-cell { -fx-background-color: -fx-control-inner-background; -fx-cell-size: 36; -fx-border-color: transparent; }
         .table-row-cell:odd { -fx-background-color: -fx-control-inner-background-alt; }
-        .table-row-cell:selected { -fx-background-color: #42627C; }
-        .table-cell { -fx-text-fill: #E2ECF3; -fx-alignment: CENTER-RIGHT; -fx-font-family: "Consolas", "JetBrains Mono", monospace; -fx-font-size: 12px; -fx-padding: 0 10 0 8; }
-        .table-cell.centro { -fx-alignment: CENTER; -fx-text-fill: #80C1DF; -fx-font-weight: bold; }
-        .table-view .placeholder .label { -fx-text-fill: #91A6B6; }
+        .table-row-cell:selected { -fx-background-color: #005C4B; }
+        .table-cell { -fx-text-fill: #E9EDEF; -fx-alignment: CENTER-RIGHT; -fx-font-family: "Consolas", "JetBrains Mono", monospace; -fx-font-size: 12px; -fx-padding: 0 10 0 8; }
+        .table-cell.centro { -fx-alignment: CENTER; -fx-text-fill: #53BDEB; -fx-font-weight: bold; }
+        .table-view .placeholder .label { -fx-text-fill: #8696A0; }
 
         /* ---------- gráfica ---------- */
         .chart { -fx-background-color: transparent; }
-        .chart-title { -fx-text-fill: #E2ECF3; -fx-font-size: 15px; -fx-font-weight: bold; -fx-font-family: "Consolas", monospace; }
+        .chart-title { -fx-text-fill: #E9EDEF; -fx-font-size: 15px; -fx-font-weight: bold; -fx-font-family: "Consolas", monospace; }
         .chart-content { -fx-padding: 6; }
-        .chart-plot-background { -fx-background-color: #1B2632; }
-        .chart-vertical-grid-lines, .chart-horizontal-grid-lines { -fx-stroke: #354959; -fx-stroke-width: 1; }
+        .chart-plot-background { -fx-background-color: #111B21; }
+        .chart-vertical-grid-lines, .chart-horizontal-grid-lines { -fx-stroke: #2A3942; -fx-stroke-width: 1; }
         .chart-alternative-row-fill, .chart-alternative-column-fill { -fx-fill: transparent; -fx-stroke: transparent; }
-        .axis { -fx-tick-label-fill: #AEC2D0; -fx-font-size: 11px; }
-        .axis-label { -fx-text-fill: #AEC2D0; }
-        .axis-tick-mark, .axis-minor-tick-mark { -fx-stroke: #516879; }
-        .axis:top, .axis:bottom, .axis:left, .axis:right { -fx-border-color: #516879; }
+        .axis { -fx-tick-label-fill: #AEBAC1; -fx-font-size: 11px; }
+        .axis-label { -fx-text-fill: #AEBAC1; }
+        .axis-tick-mark, .axis-minor-tick-mark { -fx-stroke: #50616B; }
+        .axis:top, .axis:bottom, .axis:left, .axis:right { -fx-border-color: #50616B; }
 
         .chart-series-line { -fx-stroke-width: 2.4px; }
         .chart-line-symbol { -fx-background-color: transparent; -fx-padding: 0; }
 
-        .default-color0.chart-series-line { -fx-stroke: #80C1DF; -fx-stroke-width: 2.8px; }
-        .default-color1.chart-series-line { -fx-stroke: #EDBA7A; -fx-stroke-width: 2.8px; }
-        .default-color2.chart-series-line { -fx-stroke: #AFC3D2; -fx-stroke-width: 1.6px; -fx-stroke-dash-array: 7 6; }
-        .default-color3.chart-series-line { -fx-stroke: #688394; -fx-stroke-width: 1.4px; }
-        .default-color4.chart-series-line { -fx-stroke: #DDA1BC; -fx-stroke-width: 1.3px; }
+        .default-color0.chart-series-line { -fx-stroke: #53BDEB; -fx-stroke-width: 2.8px; }
+        .default-color1.chart-series-line { -fx-stroke: #F0B86E; -fx-stroke-width: 2.8px; }
+        .default-color2.chart-series-line { -fx-stroke: #D1D7DB; -fx-stroke-width: 1.6px; -fx-stroke-dash-array: 7 6; }
+        .default-color3.chart-series-line { -fx-stroke: #8696A0; -fx-stroke-width: 1.4px; }
+        .default-color4.chart-series-line { -fx-stroke: #FF8FA3; -fx-stroke-width: 1.3px; }
         .default-color5.chart-series-line { -fx-stroke: transparent; }
         .default-color6.chart-series-line { -fx-stroke: transparent; }
 
         .default-color5.chart-line-symbol {
-            -fx-background-color: #B6A2E2, #1B2632; -fx-background-insets: 0, 2;
+            -fx-background-color: #D8A6FF, #111B21; -fx-background-insets: 0, 2;
             -fx-background-radius: 8px; -fx-padding: 5px;
         }
         .default-color6.chart-line-symbol {
-            -fx-background-color: #74C8B4, #1B2632, #74C8B4; -fx-background-insets: 0, 2, 4;
+            -fx-background-color: #25D366, #111B21, #25D366; -fx-background-insets: 0, 2, 4;
             -fx-background-radius: 10px; -fx-padding: 7px;
             -fx-effect: dropshadow(gaussian, rgba(116,200,180,0.50), 12, 0.3, 0, 0);
         }
-        .tooltip { -fx-background-color: #354D61; -fx-text-fill: white; -fx-font-family: "Consolas", monospace; -fx-background-radius: 8; }
+        .tooltip { -fx-background-color: #2A3942; -fx-text-fill: white; -fx-font-family: "Consolas", monospace; -fx-background-radius: 8; }
         .desarrollo-panel { -fx-background-color: transparent; }
         .desarrollo-bloque {
-            -fx-background-color: #273746; -fx-background-radius: 12;
-            -fx-border-color: #3A5263; -fx-border-radius: 12; -fx-padding: 14;
+            -fx-background-color: #202C33; -fx-background-radius: 12;
+            -fx-border-color: #2A3942; -fx-border-radius: 12; -fx-padding: 14;
         }
-        .desarrollo-titulo { -fx-text-fill: #80C1DF; -fx-font-size: 14px; -fx-font-weight: bold; }
-        .desarrollo-linea { -fx-text-fill: #E0E9EF; -fx-font-size: 13px; -fx-padding: 2 0 2 4; }
-        .table-view { -fx-background-color: #1B2632; -fx-border-color: #3A5263; }
-        .table-view .column-header-background { -fx-background-color: #354D61; }
-        .table-view .column-header, .table-view .filler { -fx-background-color: #354D61; -fx-size: 38px; }
-        .table-view .column-header .label { -fx-text-fill: #F0F5F8; -fx-font-weight: bold; }
-        .table-row-cell { -fx-background-color: #22313F; -fx-border-color: #344858; -fx-table-cell-border-color: #344858; }
-        .table-row-cell:odd { -fx-background-color: #273746; }
-        .table-cell { -fx-text-fill: #E0E9EF; -fx-alignment: CENTER; -fx-padding: 7 10 7 10; }
+        .desarrollo-titulo { -fx-text-fill: #53BDEB; -fx-font-size: 14px; -fx-font-weight: bold; }
+        .desarrollo-linea { -fx-text-fill: #E9EDEF; -fx-font-size: 13px; -fx-padding: 2 0 2 4; }
+        .table-view { -fx-background-color: #111B21; -fx-border-color: #2A3942; }
+        .table-view .column-header-background { -fx-background-color: #2A3942; }
+        .table-view .column-header, .table-view .filler { -fx-background-color: #2A3942; -fx-size: 38px; }
+        .table-view .column-header .label { -fx-text-fill: #E9EDEF; -fx-font-weight: bold; }
+        .table-row-cell { -fx-background-color: #182229; -fx-border-color: #2A3942; -fx-table-cell-border-color: #2A3942; }
+        .table-row-cell:odd { -fx-background-color: #202C33; }
+        .table-cell { -fx-text-fill: #E9EDEF; -fx-alignment: CENTER; -fx-padding: 7 10 7 10; }
+
+        /* ===== Ajustes finales: compacto + WhatsApp Web oscuro ===== */
+        .root { -fx-background-color: #111B21; }
+        .header { -fx-background-color: linear-gradient(to right, #202C33, #111B21); -fx-border-color: #2A3942; -fx-padding: 11 20 11 20; }
+        .card { -fx-background-color: #202C33; -fx-border-color: #2A3942; -fx-padding: 9 10 9 10; -fx-background-radius: 12; -fx-border-radius: 12; }
+        .card-titulo { -fx-text-fill: #00A884; }
+        .campo-label { -fx-text-fill: #AEBAC1; -fx-font-size: 11.5px; }
+        .text-field { -fx-background-color: #111B21; -fx-text-fill: #E9EDEF; -fx-prompt-text-fill: #8696A0; -fx-border-color: #324650; -fx-padding: 6 9 6 9; }
+        .text-field:focused { -fx-border-color: #00A884; }
+        .combo-box { -fx-background-color: #111B21; -fx-border-color: #324650; }
+        .combo-box:focused { -fx-border-color: #00A884; }
+        .combo-box-popup .list-view, .combo-box-popup .list-cell { -fx-background-color: #202C33; }
+        .combo-box-popup .list-cell:hover { -fx-background-color: #30444C; }
+        .combo-box-popup .list-cell:filled:selected { -fx-background-color: #005C4B; }
+        .tecla-matematica { -fx-background-color: #2A3942; -fx-text-fill: #E9EDEF; -fx-padding: 4 3 4 3; }
+        .tecla-matematica:hover { -fx-background-color: #005C4B; }
+        .teclado-plegable { -fx-background-color: #182229; -fx-border-color: #324650; -fx-border-radius: 8; }
+        .teclado-plegable > .title { -fx-background-color: #182229; -fx-padding: 6 9 6 9; }
+        .teclado-plegable > .title > .text { -fx-fill: #D1D7DB; }
+        .teclado-plegable > .content { -fx-background-color: #202C33; -fx-padding: 7; }
+        .boton-primario { -fx-background-color: linear-gradient(to bottom right, #00A884, #25D366); -fx-text-fill: #0B141A; -fx-padding: 9 14 9 14; }
+        .boton-primario:hover { -fx-effect: dropshadow(gaussian, rgba(37,211,102,0.3), 14, 0.2, 0, 0); }
+        .stat-destacado { -fx-text-fill: #25D366; }
+        .check-box:selected .box { -fx-background-color: #00A884; -fx-border-color: #00A884; }
+        .check-box:selected .mark { -fx-background-color: #111B21; }
+        .estado-ok, .badge-ok { -fx-text-fill: #25D366; }
+        .chart-plot-background { -fx-background-color: #111B21; }
+        .chart-vertical-grid-lines, .chart-horizontal-grid-lines { -fx-stroke: #2A3942; }
+        .default-color0.chart-series-line { -fx-stroke: #53BDEB; }
+        .default-color1.chart-series-line { -fx-stroke: #00A884; }
+        .default-color2.chart-series-line { -fx-stroke: #8696A0; }
+        .default-color3.chart-series-line { -fx-stroke: #7AE3C3; }
+        .default-color4.chart-series-line { -fx-stroke: #F0B86E; }
+        .default-color5.chart-line-symbol { -fx-background-color: #D8A6FF, #111B21; }
+        .default-color6.chart-line-symbol { -fx-background-color: #25D366, #111B21, #25D366; }
+        .desarrollo-titulo { -fx-text-fill: #53BDEB; }
+        .table-row-cell:selected { -fx-background-color: #005C4B; }
+        /* ===== Graficador cartesiano con cuadrícula adaptable ===== */
+        .plano-cartesiano {
+            -fx-background-color: #0B141A;
+            -fx-background-radius: 10;
+            -fx-border-color: #354951;
+            -fx-border-width: 1;
+            -fx-border-radius: 10;
+        }
+        .grafica-formula {
+            -fx-font-family: "Consolas", "JetBrains Mono", monospace;
+            -fx-font-size: 13px;
+            -fx-font-weight: bold;
+            -fx-text-fill: #D1D7DB;
+        }
+        .grafica-barra { -fx-padding: 0; }
+        .grafica-boton {
+            -fx-background-color: #263A42;
+            -fx-text-fill: #E9EDEF;
+            -fx-background-radius: 7;
+            -fx-border-color: #3B555C;
+            -fx-border-radius: 7;
+            -fx-font-size: 12px;
+            -fx-font-weight: bold;
+            -fx-padding: 5 10 5 10;
+            -fx-cursor: hand;
+        }
+        .grafica-boton:hover { -fx-background-color: #005C4B; -fx-border-color: #00A884; }
+        /* Área derecha compacta: más altura para la gráfica sin cortar números. */
+        .stat { -fx-padding: 4 8 4 8; -fx-background-radius: 8; -fx-border-radius: 8; }
+        .stat-titulo { -fx-font-size: 9px; }
+        .stat-valor { -fx-font-size: 12px; }
+        .estado { -fx-padding: 5 9 5 9; -fx-font-size: 11px; -fx-background-radius: 7; }
+        .tab { -fx-padding: 3 10 3 10; }
+        .grafica-boton { -fx-padding: 3 8 3 8; -fx-font-size: 11px; }
+        .grafica-formula { -fx-font-size: 11px; }
+        .grafica-coordenadas { -fx-font-size: 10px; }
+        .leyenda-texto { -fx-font-size: 10px; }
+        .grafica-coordenadas {
+            -fx-text-fill: #7AE3C3;
+            -fx-font-family: "Consolas", "JetBrains Mono", monospace;
+            -fx-font-size: 11px;
+        }
         """;
 
     // ================================================================== MAIN

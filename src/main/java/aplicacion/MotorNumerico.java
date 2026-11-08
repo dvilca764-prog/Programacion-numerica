@@ -179,6 +179,21 @@ public final class MotorNumerico {
         if (!Double.isFinite(raiz)) {
             r.fallo = true;
             r.mensaje = "El método falló o divergió. Probá con otro punto inicial.";
+        } else if (m == Metodo.PUNTO_FIJO && Double.isFinite(r.errorFinal())
+                && r.errorFinal() <= tol) {
+            // Punto Fijo se detiene por |x_(n+1) - x_n| <= epsilon.
+            // No se debe exigir además |f(x)| <= epsilon para informar
+            // que se cumplió EL criterio del método: son comprobaciones distintas.
+            r.convergio = true;
+            if (Double.isFinite(residual) && Math.abs(residual) <= tol) {
+                r.mensaje = "Punto fijo: se alcanzó la tolerancia en " + r.iter
+                        + " iteraciones; f(x) también cumple la tolerancia.";
+            } else {
+                r.mensaje = "Punto fijo: se alcanzó la tolerancia de las iteraciones en "
+                        + r.iter + " pasos, pero |f(x)| = " + Math.abs(residual)
+                        + " supera la tolerancia (o no está definido). "
+                        + "Revisá que g(x) sea equivalente a f(x)=0.";
+            }
         } else if (Double.isFinite(r.errorFinal()) && r.errorFinal() < tol
                 && Double.isFinite(residual) && Math.abs(residual) <= tol) {
             r.convergio = true;
